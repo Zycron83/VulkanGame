@@ -1,0 +1,10 @@
+.cache
+build
+.vscode
+
+Test.cpp
+a.out
+
+imgui.ini
+AGENTS.md
+.DS_Store
