@@ -26,8 +26,9 @@ target_sources(VulkanGame PRIVATE
 #     FILES ${CPPM_FILES}
 # )
 
-# target_compile_options(VulkanGame PRIVATE "-fsanitize=address" "-fno-omit-frame-pointer")
-# target_link_options(VulkanGame PRIVATE "-fsanitize=address")
+target_compile_options(VulkanGame PRIVATE "-fsanitize=address" "-fno-omit-frame-pointer")
+target_link_options(VulkanGame PRIVATE "-fsanitize=address")
+# target_compile_options(VulkanGame PRIVATE "-ftime-trace")
 target_precompile_headers(VulkanGame PRIVATE 
     <vulkan/vulkan.hpp>
     <vulkan/vulkan_structs.hpp>

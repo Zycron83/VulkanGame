@@ -221,6 +221,7 @@ int main(int argc, char* argv[])
                 Text("Frame Time: %.2f ms", std::accumulate(frametimes.begin(), frametimes.end(), 0.0) / frametimes.size());
                 Text("Triangles: %zu", g_DebugFrameStats.index_count / 3);
                 Text("Chunk Memory: %.2lu MB", g_Settings.chunkBytes.load() / 1024 / 1024);
+                Text("Chunks in Queue: %zu", g_Renderer->terrain.chunkMeshQueue.size());
                 End();
 
                 // Begin("Noise Settings");
@@ -242,7 +243,7 @@ int main(int argc, char* argv[])
                 g_Renderer->terrain.init(g_Renderer->vkc);
             }
             g_DebugFrameStats.index_count = 0;
-            g_Renderer->terrain.tickFrame(g_Renderer->vkc);
+            g_Renderer->terrain.tickFrame(g_Renderer->vkc, *g_Renderer->camera.get());
             g_Renderer->vkc.waitForTransfers();
             g_Renderer->drawFrame();
 
