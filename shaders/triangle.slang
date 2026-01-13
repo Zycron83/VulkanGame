@@ -11,7 +11,6 @@ struct VertexOutput
     float4 position : SV_Position;
     float3 color : COLOR;
     float3 normal : NORMAL;
-    float2 point : CORNER;
 };
 
 // Uniform buffer
@@ -35,7 +34,6 @@ VertexOutput vertexMain(VertexInput input, uint index : SV_VertexID)
     uint cube_index = index / 24;
     output.color = abs(normalize(output.normal));
 
-    output.point = ubo.point;
     return output;
 }
 
@@ -43,10 +41,11 @@ VertexOutput vertexMain(VertexInput input, uint index : SV_VertexID)
 [shader("fragment")]
 float4 fragmentMain(VertexOutput input) : SV_Target
 {
-    if (distance(input.position.xy, input.point) < 10) {
-        return float4(1);
-    }
-    // let up = float3(0, 1, 0);
-    // let color = lerp(float3(1,1,1), float3(1,0,0), max(0.0, dot(up, input.normal)));
-    return (float4(input.color, 1.0));
+    // up
+    if (input.normal.y == 1) { return float4(float3(1.0), 1); }
+    if (input.normal.x == 1 
+    ||  input.normal.z == 1) { return float4(float3(0.8), 1); }
+    if (input.normal.x == -1 
+    || input.normal.z == -1) { return float4(float3(0.5), 1); }
+    return float4(float3(0.8,0.1,0.8), 1);
 }

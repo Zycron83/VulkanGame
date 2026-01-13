@@ -389,7 +389,7 @@ enum class Timeline {
 
 };
 
-void Renderer::recordCommandBuffer(vk::CommandBuffer commandBuffer, uint32_t imageIndex, uint32_t currentFrame) {
+void Renderer::recordCommandBuffer(vk::CommandBuffer commandBuffer, uint32_t imageIndex, uint32_t frameIndex) {
 	vk::CommandBufferBeginInfo beginInfo{};
 	commandBuffer.begin(beginInfo);
 
@@ -443,7 +443,7 @@ void Renderer::recordCommandBuffer(vk::CommandBuffer commandBuffer, uint32_t ima
 
 	commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, this->graphicsPipeline);
 
-	commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout, 0, descriptorSets[currentFrame], nullptr);
+	commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout, 0, descriptorSets[frameIndex], nullptr);
 
 	commandBuffer.setViewport(0,
 		vk::Viewport{
@@ -490,10 +490,9 @@ void Renderer::drawFrame() {
 	// }
 	// std::cout << "Drawing Frame " << frameCount << "!\n";
 	// frameCount += 1;
-	auto &frame = vkc.frames[vkc.currentFrame];
-	vkc.pruneDestructionQueue(frame.destruction_queue);
-    
+	auto &frame = vkc.frames[vkc.frameIndex()];
     std::ignore = vkc.device.waitForFences(frame.inFlightFence, true, UINT64_MAX);
+    vkc.pruneDestructionQueue();
     vkc.device.resetFences(frame.inFlightFence);
 
     auto [result, imageIndex] = vkc.device.acquireNextImageKHR(swapchain, UINT64_MAX, frame.imageAvailableSemaphore, nullptr);
@@ -504,7 +503,7 @@ void Renderer::drawFrame() {
     frame.commandBuffer.reset();
 
 	updateUniformBuffers(frame.uniformBuffer);
-    recordCommandBuffer(frame.commandBuffer, imageIndex, vkc.currentFrame);
+    recordCommandBuffer(frame.commandBuffer, imageIndex, vkc.frameIndex());
 
 	std::vector<vk::SemaphoreSubmitInfo> waitInfo {{
 		frame.imageAvailableSemaphore,
@@ -541,7 +540,7 @@ void Renderer::drawFrame() {
         std::cerr << "SUBOPTIMAL_KHR PRESENTATION" << std::endl;
     }
 
-    vkc.currentFrame = (vkc.currentFrame + 1) % vkc.FRAME_COUNT;
+    vkc.currentFrame++;
 }
 
 void Renderer::initSyncObjects() {

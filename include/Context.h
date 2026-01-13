@@ -5,8 +5,6 @@
 #include <queue>
 #include <vulkan/vulkan.hpp>
 
-#include <vector>
-
 #include "Buffer.h"
 
 struct VulkanContext {
@@ -30,18 +28,20 @@ struct VulkanContext {
     VmaAllocator allocator;
     constexpr static size_t FRAME_COUNT = 2;
     size_t currentFrame = 0;
+    size_t frameIndex() { return currentFrame % FRAME_COUNT; };
     struct Frame {
 		vk::CommandBuffer commandBuffer;
 		vk::Semaphore imageAvailableSemaphore;
 		vk::Fence inFlightFence;
 		AllocBuffer uniformBuffer;
-        struct Variant;
-        std::vector<Variant> destruction_queue;
 	};
 	std::array<Frame, FRAME_COUNT> frames;
 
     void init(GLFWwindow *);
     void deinit();
+
+    struct Variant;
+    std::queue<std::pair<size_t, Variant>> destruction_queue;
 
     struct Upload { 
         AllocBuffer dst;  
@@ -54,11 +54,11 @@ struct VulkanContext {
     std::mutex submitMtx;
     void uploadBuffers(vk::ArrayProxy<Upload>);
     void waitForTransfers();
-    void pruneDestructionQueue(typeof(Frame::destruction_queue) &queue);
-    void queueDestroy(Frame::Variant);
+    void pruneDestructionQueue();
+    void queueDestroy(Variant);
 };
 
-struct VulkanContext::Frame::Variant {
+struct VulkanContext::Variant {
     enum Type {
         eAllocBuffer,
         eMallocPtr

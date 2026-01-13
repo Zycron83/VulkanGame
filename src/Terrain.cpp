@@ -61,6 +61,7 @@ constexpr std::array<Index, 36> indices = {
 };
 
 void Chunk::init(const VulkanContext &vkc) {
+    this->data = std::make_unique<typeof(*data)>();
     // std::string chunk_name = std::format("Chunk {}, {}", chunkCoord.x, chunkCoord.z);
     // g_DebugNameState.Push(chunk_name.c_str());
     // g_DebugNameState.Name("Vertex");
@@ -76,18 +77,19 @@ void Chunk::init(const VulkanContext &vkc) {
     // g_DebugNameState.Pop();
 }
 void Chunk::deinit(VulkanContext &vkc) {
-    auto &queue = vkc.frames[vkc.currentFrame].destruction_queue;
+    std::lock_guard lock{chunkMtx};
     if (vertexCount > 0 || indexCount > 0) {
-        queue.push_back(vertexBuffer);
-        queue.push_back(indexBuffer);
+        vkc.queueDestroy(vertexBuffer);
+        vkc.queueDestroy(indexBuffer);
         g_Settings.chunkBytes -= this->vertexBuffer.size + this->indexBuffer.size;
         this->vertexCount = 0;
         this->indexCount = 0;
     }
+    this->data.reset();
 }
 
 Block Chunk::getBlock(int x, int y, int z) const {
-    return data[x * CHUNK_LENGTH * CHUNK_LENGTH + y * CHUNK_LENGTH + z];
+    return (*data)[x * CHUNK_LENGTH * CHUNK_LENGTH + y * CHUNK_LENGTH + z];
 }
 Block Chunk::getBlock(glm::ivec3 coord) const {
     if (glm::any(glm::greaterThanEqual(coord, {CHUNK_LENGTH, CHUNK_LENGTH, CHUNK_LENGTH}))
@@ -95,20 +97,20 @@ Block Chunk::getBlock(glm::ivec3 coord) const {
     ) {
         return Block::Invalid;
     }
-    return data[coord.x * CHUNK_LENGTH * CHUNK_LENGTH + coord.y * CHUNK_LENGTH + coord.z];
+    return (*data)[coord.x * CHUNK_LENGTH * CHUNK_LENGTH + coord.y * CHUNK_LENGTH + coord.z];
 }
 
 void Chunk::setBlock(Block b, int x, int y, int z) {
     assert(x < CHUNK_LENGTH && y < CHUNK_LENGTH && z < CHUNK_LENGTH);
     assert(x >= 0 && y >= 0 && z >= 0);
-    data[x * CHUNK_LENGTH * CHUNK_LENGTH + y * CHUNK_LENGTH + z] = b;
+    (*data)[x * CHUNK_LENGTH * CHUNK_LENGTH + y * CHUNK_LENGTH + z] = b;
     if (transparent(b)) { // set 0
         opaquenessMask_Y[x][z] &= ~(1 << y);
-        opaquenessMask_Z[x][y] &= ~(1 << z);
+        opaquenessMask_Z[y][x] &= ~(1 << z);
         opaquenessMask_X[z][y] &= ~(1 << x);
     } else { // set 1
         opaquenessMask_Y[x][z] |= (1 << y);
-        opaquenessMask_Z[x][y] |= (1 << z);
+        opaquenessMask_Z[y][x] |= (1 << z);
         opaquenessMask_X[z][y] |= (1 << x);
     }
     // queueOp = QueueOp::UPDATE_MESH;
@@ -124,7 +126,7 @@ void Chunk::setBlock(Block b, int x, int y, int z) {
     // }
 }
 void Chunk::setBlock(Block b, glm::ivec3 coord) {
-    data[coord.x * CHUNK_LENGTH * CHUNK_LENGTH + coord.y * CHUNK_LENGTH + coord.z] = b;
+    (*data)[coord.x * CHUNK_LENGTH * CHUNK_LENGTH + coord.y * CHUNK_LENGTH + coord.z] = b;
 }
 
 glm::ivec3 Chunk::coordFromIndex(int i) {
@@ -139,17 +141,18 @@ glm::ivec3 Chunk::coordFromIndex(int i) {
 }
 
 void Chunk::fillChunk() {
+    std::lock_guard lock{chunkMtx};
     const auto simpleSetBlock = [this](Block b, int x, int y, int z) {
         assert(x < CHUNK_LENGTH && y < CHUNK_LENGTH && z < CHUNK_LENGTH);
         assert(x >= 0 && y >= 0 && z >= 0);
-        data[x * CHUNK_LENGTH * CHUNK_LENGTH + y * CHUNK_LENGTH + z] = b;
+        (*data)[x * CHUNK_LENGTH * CHUNK_LENGTH + y * CHUNK_LENGTH + z] = b;
         if (transparent(b)) { // set 0
             opaquenessMask_Y[x][z] &= ~(1 << y);
-            opaquenessMask_Z[x][y] &= ~(1 << z);
+            opaquenessMask_Z[y][x] &= ~(1 << z);
             opaquenessMask_X[z][y] &= ~(1 << x);
         } else { // set 1
             opaquenessMask_Y[x][z] |= (1 << y);
-            opaquenessMask_Z[x][y] |= (1 << z);
+            opaquenessMask_Z[y][x] |= (1 << z);
             opaquenessMask_X[z][y] |= (1 << x);
         }
     };
@@ -158,10 +161,10 @@ void Chunk::fillChunk() {
     for (int i = 0; i < CHUNK_LENGTH; i += 1)
     for (int j = 0; j < CHUNK_LENGTH; j += 1) {
         // const float height = simplex.fractal(g_Settings.Noise.octaves, (i + chunkCoord.x * CHUNK_LENGTH) * scale, (j + chunkCoord.z * CHUNK_LENGTH) * scale) * CHUNK_LENGTH;
-        const float height = (SimplexNoise::noise((i + chunkCoord.x * CHUNK_LENGTH) * scale, (j + chunkCoord.z * CHUNK_LENGTH) * scale) * CHUNK_LENGTH + CHUNK_LENGTH) / 2.0;
+        const float height = (SimplexNoise::noise((i + chunkCoord.x * CHUNK_LENGTH) * scale, (j + chunkCoord.z * CHUNK_LENGTH) * scale) * CHUNK_LENGTH + CHUNK_LENGTH);
         // const float height = 10;
         for (int k = 0; k < CHUNK_LENGTH; k += 1) {
-            if (k < height) {
+            if (k + chunkCoord.y * CHUNK_LENGTH < height) {
                 simpleSetBlock(Block::Stone, i, k, j);
             } else {
                 simpleSetBlock(Block::Air, i, k, j);
@@ -170,20 +173,21 @@ void Chunk::fillChunk() {
     };
 }
 
-// constexpr glm::ivec3 unitDir[6] = {
-//     {1,0,0}, {-1,0,0},
-//     {0,1,0}, {0,-1,0},
-//     {0,0,1}, {0,0,-1},
-// };
+constexpr glm::ivec3 unitDir[6] = {
+    {1,0,0}, {-1,0,0},
+    {0,1,0}, {0,-1,0},
+    {0,0,1}, {0,0,-1},
+};
 
-void Chunk::writeMesh(VulkanContext &vkc) {
+std::vector<float> times;
+
+void Terrain::writeMesh(VulkanContext &vkc, glm::ivec3 chunkCoord) {
+    std::lock_guard lock{chunkMtx};
     constexpr int voxelCount = CHUNK_LENGTH * CHUNK_LENGTH * CHUNK_LENGTH;
-    // std::vector<Vertex> vertexData;
-    // vertexData.resize(voxelCount * vertices.size());
-    // std::vector<Index> indexData;
-    // indexData.resize(voxelCount * indices.size());
     static Vertex vertexData[voxelCount * vertices.size()];
     static Index indexData[voxelCount * indices.size()];
+
+    auto chunk = chunks.at(chunkCoord);
 
     // track where we are writing into the mapped buffers
     size_t vertexOffset = 0; // in vertices
@@ -192,7 +196,7 @@ void Chunk::writeMesh(VulkanContext &vkc) {
     const auto writeFace = [&, this](Dir dir, glm::ivec3 coord) {
         for (int j = 0; j < 4; j += 1) {
             auto v = vertices[int{dir} * 4 + j];
-            v.position += coord + this->chunkCoord * CHUNK_LENGTH;
+            v.position += coord + chunkCoord * CHUNK_LENGTH;
             vertexData[vertexOffset + j] = v;
         }
         for (int j = 0; j < 6; j += 1) {
@@ -202,11 +206,23 @@ void Chunk::writeMesh(VulkanContext &vkc) {
         indexOffset += 6;
     };
 
-    // auto start_time = std::chrono::steady_clock::now();
+    std::array<uint32_t, CHUNK_LENGTH> emptyMask;
+    // memset(emptyMask, 0, CHUNK_LENGTH);
+
+    auto start_time = std::chrono::steady_clock::now();
+    auto upChunk = chunkCoord + unitDir[Y_POS];
+    auto downChunk = chunkCoord + unitDir[Y_NEG];
+    auto upZMask = chunks.contains(upChunk) ? chunks.at(upChunk)->opaquenessMask_Z[0] : emptyMask;
+    auto downZMask = chunks.contains(downChunk) ? chunks.at(downChunk)->opaquenessMask_Z[0] : emptyMask;
     for (int x = 0; x < CHUNK_LENGTH; x += 1) {
+        auto upMask = upZMask[x];
+        auto downMask = downZMask[x];
         for (int z = 0; z < CHUNK_LENGTH; z += 1) {
-            uint64_t bits = opaquenessMask_Y[x][z];
-            bool curr, prev = bits & 1;
+            // up <<|>> down
+            uint64_t bits = chunk->opaquenessMask_Y[x][z];
+            if (bits == 0) continue;
+            bool curr = false;
+            bool prev = downMask & 1;
             // bits >>= 1;
             int y = 0;
             while (y < CHUNK_LENGTH) {
@@ -222,12 +238,17 @@ void Chunk::writeMesh(VulkanContext &vkc) {
                 y += skip;
                 bits >>= skip;
             }
+            curr = upMask & 1;
+            if (curr - prev == -1) writeFace(Y_POS, {x, CHUNK_LENGTH-1, z});
+            downMask >>= 1;
+            upMask >>= 1;
         }
-    // }
+    }
 
-    // for (int x = 0; x < CHUNK_LENGTH; x += 1) {
+    for (int x = 0; x < CHUNK_LENGTH; x += 1) {
         for (int y = 0; y < CHUNK_LENGTH; y += 1) {
-            uint64_t bits = opaquenessMask_Z[x][y];
+            uint64_t bits = chunk->opaquenessMask_Z[y][x];
+            if (bits == 0) continue;
             bool curr, prev = bits & 1;
             // bits >>= 1;
             int z = 0;
@@ -249,7 +270,8 @@ void Chunk::writeMesh(VulkanContext &vkc) {
 
     for (int z = 0; z < CHUNK_LENGTH; z += 1) {
         for (int y = 0; y < CHUNK_LENGTH; y += 1) {
-            uint64_t bits = opaquenessMask_X[z][y];
+            uint64_t bits = chunk->opaquenessMask_X[z][y];
+            if (bits == 0) continue;
             bool curr, prev = bits & 1;
             // bits >>= 1;
             int x = 0;
@@ -269,60 +291,54 @@ void Chunk::writeMesh(VulkanContext &vkc) {
         }
     }
 
-    // auto end_time = std::chrono::steady_clock::now();
-    // std::println("Passes took {} us", std::chrono::duration<float, std::micro>(end_time - start_time).count());
+    auto end_time = std::chrono::steady_clock::now();
+    times.push_back(std::chrono::duration<float, std::micro>(end_time - start_time).count());
+    // std::println("Meshing [{}, {}, {}] took {} us", chunkCoord.x, chunkCoord.y, chunkCoord.z, std::ranges::fold_left(times, 0, std::plus<float>()) / times.size());
 
     if (vertexOffset == 0 || indexOffset == 0) {
         // empty chunk
-        this->vertexCount = 0;
-        this->indexCount = 0;
+        chunk->vertexCount = 0;
+        chunk->indexCount = 0;
         return;
     }
 
     std::string chunk_name = std::format("Chunk {}, {}", chunkCoord.x, chunkCoord.z);
     g_DebugNameState.Push(chunk_name.c_str());
     g_DebugNameState.Name("Vertex");
-    vertexBuffer.initDevice(vkc,
+    chunk->vertexBuffer.initDevice(vkc,
         sizeof(Vertex) * vertexOffset,
         vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst
     );
     g_DebugNameState.Name("Index");
-    indexBuffer.initDevice(vkc,
+    chunk->indexBuffer.initDevice(vkc,
         sizeof(Index) * indexOffset,
         vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eTransferDst
     );
     g_DebugNameState.Pop();
 
     vkc.uploadBuffers({
-        { this->indexBuffer, indexData },
-        { this->vertexBuffer, vertexData }
+        { chunk->indexBuffer, indexData },
+        { chunk->vertexBuffer, vertexData }
     });
-    g_Settings.chunkBytes += this->vertexBuffer.size + this->indexBuffer.size;
-    this->vertexCount = vertexOffset;
-    this->indexCount = indexOffset;
+    g_Settings.chunkBytes += chunk->vertexBuffer.size + chunk->indexBuffer.size;
+    chunk->vertexCount = vertexOffset;
+    chunk->indexCount = indexOffset;
 }
 
 constexpr size_t Chunk::size() {
     return sizeof(data);
 }
 
-void Terrain::init(const VulkanContext &vkc) {
+void Terrain::init(VulkanContext &vkc) {
     using namespace std::chrono;
     auto start = steady_clock::now();
-    constexpr int N = 20;
-    for (int y = 0; y < 1; y++)
-    for (int x = 0; x < N; x++)
-    for (int z = 0; z < N; z++) {
-        // std::println("Loading: {}", std::chrono::steady_clock::now().time_since_epoch());
-        loadChunk(vkc, {x, y, z});
-    };
     auto end = steady_clock::now();
     this->stopThread = false;
-    this->chunkQueueProcessor = std::thread(processChunks, this, const_cast<VulkanContext*>(&vkc));
+    this->chunkQueueProcessor = std::thread(processChunks, this, &vkc);
     std::println("Initted Terrain in {} milliseconds", duration<float, std::milli>(end - start).count());
 }
 
-void Terrain::dirtyChunk(Chunk *chunk, QueueOp queueOp) {
+void Terrain::dirtyChunk(std::shared_ptr<Chunk> chunk, QueueOp queueOp) {
     {
         std::scoped_lock lock(queueMtx);
         if (not chunk->inQueue) {
@@ -336,62 +352,71 @@ void Terrain::dirtyChunk(Chunk *chunk, QueueOp queueOp) {
 
 // Chunk processing thread
 void Terrain::processChunks(Terrain *terrain, VulkanContext *vkc) {
-    while (not terrain->stopThread) {
+    while (true) {
         std::unique_lock lock(terrain->queueMtx);
         // std::println("Queue Count: {}", terrain->chunkMeshQueue.size());
         terrain->queueCond.wait(lock, [terrain]() {
             return not terrain->chunkMeshQueue.empty() || terrain->stopThread;
         });
-        if (terrain->chunkMeshQueue.empty()) {
+        if (terrain->stopThread) {
             break;
         }
-        Chunk *chunk = terrain->chunkMeshQueue.front();
+        std::shared_ptr<Chunk> chunk = terrain->chunkMeshQueue.front();
         terrain->chunkMeshQueue.pop_front();
         lock.unlock();
+        if (chunk->data == nullptr) {
+            assert(chunk.use_count() == 1);
+            continue;
+        }
 
+        static size_t noop_count = 0;
         switch (chunk->queueOp) {
-            case FILL: chunk->fillChunk(); 
-            case UPDATE_MESH: chunk->writeMesh(*vkc);
-            case NONE: 
+            case NONE: std::println(stderr, "Queue processing NONE op");
+            case FILL: chunk->fillChunk();
+            case UPDATE_MESH: terrain->writeMesh(*vkc, chunk->chunkCoord);
         }
         // std::println("X,0,0: {:b}, 0,Y,0: {:b}, 0,0,Z: {:b}", chunk->opaquenessMask_X[1][0], chunk->opaquenessMask_Y[1][0], chunk->opaquenessMask_Z[1][0]);
-        chunk->inQueue = false;
         chunk->queueOp = QueueOp::NONE;
+        chunk->inQueue = false;
     }
 }
 
 void Terrain::loadChunksAround(VulkanContext &vkc, const glm::ivec3 centerChunkCoord) {
-    static glm::ivec3 lastCenter = {0,0,0};
+    static glm::ivec3 lastCenter = glm::ivec3{INT_MAX};
     if (centerChunkCoord == lastCenter) return;
     else lastCenter = centerChunkCoord;
-    std::cout << "Loading chunks around " << centerChunkCoord << std::endl;
+    // std::cout << "Loading chunks around " << centerChunkCoord << std::endl;
 
     constexpr int RENDER_DIST = 10;
-    constexpr int UNRENDER_DIST = RENDER_DIST + 2;
-    for (int x = -UNRENDER_DIST; x <= UNRENDER_DIST; x++) {
-        for (int z = -UNRENDER_DIST; z <= UNRENDER_DIST; z++) {
-            glm::ivec3 chunkCoord = centerChunkCoord + glm::ivec3(x, 0, z);
-            chunkCoord.y = 0;
-            if (x <= RENDER_DIST && x >= -RENDER_DIST && z <= RENDER_DIST && z >= -RENDER_DIST) {
-                // load
-                if (!chunks.contains(chunkCoord)) {
-                    loadChunk(vkc, chunkCoord);
-                }
-            } else {
-                // unload
-                if (chunks.contains(chunkCoord)) {
-                    unloadChunk(vkc, chunkCoord);
-                }
-            }
+    for (int y = 0; y <= RENDER_DIST; y++)
+    for (int z = 0; z <= RENDER_DIST - y; z++)
+    for (int x = 0; x <= RENDER_DIST - y - z; x++) {
+        loadChunk(vkc, centerChunkCoord + glm::ivec3(+x, +y, +z));
+        loadChunk(vkc, centerChunkCoord + glm::ivec3(-x, +y, +z));
+        loadChunk(vkc, centerChunkCoord + glm::ivec3(+x, +y, -z));
+        loadChunk(vkc, centerChunkCoord + glm::ivec3(-x, +y, -z));
+        loadChunk(vkc, centerChunkCoord + glm::ivec3(+x, -y, +z));
+        loadChunk(vkc, centerChunkCoord + glm::ivec3(-x, -y, +z));
+        loadChunk(vkc, centerChunkCoord + glm::ivec3(+x, -y, -z));
+        loadChunk(vkc, centerChunkCoord + glm::ivec3(-x, -y, -z));
+    };
+    auto it = chunks.begin(); 
+    while (it != chunks.end()) {
+        if (glm::compAdd(glm::abs(it->first - centerChunkCoord)) > RENDER_DIST + 2) {
+            // unloadChunk(vkc, it->first);
+            it->second->deinit(vkc);
+            it = chunks.erase(it);
+        } else {
+            it++;
         }
     }
 }
 
 void Terrain::loadChunk(const VulkanContext &vkc, const glm::ivec3 chunkCoord) {
-    if (chunks.contains(chunkCoord)) return;
+    if (chunkCoord.y < 0 || chunkCoord.y > 1 || chunks.contains(chunkCoord)) return;
 
-    chunks[chunkCoord] = std::make_unique<Chunk>();
-    auto chunk = chunks[chunkCoord].get();
+    chunks[chunkCoord] = std::make_shared<Chunk>();
+    auto chunk = chunks[chunkCoord];
     chunk->chunkCoord = chunkCoord;
     chunk->init(vkc);
 
@@ -415,18 +440,17 @@ void Terrain::draw(vk::CommandBuffer commandBuffer) {
 }
 
 void Terrain::unloadChunk(VulkanContext &vkc, const glm::ivec3 chunkCoord) {
+    std::println("Unloading [{}, {}, {}]", chunkCoord.x, chunkCoord.y, chunkCoord.z);
     assert(chunks.contains(chunkCoord));
-    auto chunk = chunks.at(chunkCoord).get();
-    if (chunk->inQueue) {
-        auto n = std::ranges::find(chunkMeshQueue, chunk);
-        chunkMeshQueue.erase(n);
-    }
+    auto chunk = chunks.at(chunkCoord);
     chunk->deinit(vkc);
     this->chunks.erase(chunkCoord);
 }
 
 void Terrain::deinit(VulkanContext &vkc) {
-    auto &queue = vkc.frames[vkc.currentFrame].destruction_queue;
+    this->stopThread = true;
+    this->queueCond.notify_one();
+    this->chunkQueueProcessor.join();
     for (auto& [_, chunk] : chunks) {
         chunk->deinit(vkc);
     }
@@ -434,8 +458,5 @@ void Terrain::deinit(VulkanContext &vkc) {
     while (not chunkMeshQueue.empty()) {
         chunkMeshQueue.pop_front();
     }
-    this->stopThread = true;
-    this->queueCond.notify_one();
-    this->chunkQueueProcessor.join();
 }
 

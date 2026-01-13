@@ -229,9 +229,7 @@ void VulkanContext::init(GLFWwindow *window) {
 }
 
 void VulkanContext::deinit() {
-    for (auto &frame : frames) {
-        this->pruneDestructionQueue(frame.destruction_queue);
-    };
+    this->pruneDestructionQueue();
     vmaDestroyAllocator(this->allocator);
     this->device.destroyCommandPool(this->commandPool);
     this->device.destroyCommandPool(this->transferCommandPool);
@@ -362,9 +360,11 @@ void VulkanContext::waitForTransfers() {
     // ... Reset command pool
 }
 
-void VulkanContext::pruneDestructionQueue(typeof(Frame::destruction_queue) &queue) {
-    for (auto &item : queue) {
-        using enum Frame::Variant::Type;
+void VulkanContext::pruneDestructionQueue() {
+    while (not destruction_queue.empty()) {
+        auto [frame, item] = destruction_queue.front();
+        if (currentFrame - frame <= FRAME_COUNT) return;
+        using enum Variant::Type;
         switch (item.type) {
             case eAllocBuffer: 
                 item.value.allocBuffer.deinit(allocator); 
@@ -373,8 +373,8 @@ void VulkanContext::pruneDestructionQueue(typeof(Frame::destruction_queue) &queu
                 std::println("Placeholder: Freeing eMallocPtr from Destruction Queue on Frame: {}", currentFrame);
                 break;
         }   
+        destruction_queue.pop();
     }
-    queue.clear();
 }
 
-void VulkanContext::queueDestroy(Frame::Variant var) { frames[currentFrame].destruction_queue.push_back(var); };
+void VulkanContext::queueDestroy(Variant var) { destruction_queue.push({currentFrame, var}); };
