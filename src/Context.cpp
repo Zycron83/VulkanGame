@@ -125,6 +125,7 @@ void VulkanContext::init(GLFWwindow *window) {
         if (hasExtensions && hasPresentMode) {
             std::println("Chose {} reporting vulkan {}.{}", props.deviceName.data(), vk::apiVersionMajor(props.apiVersion), vk::apiVersionMinor(props.apiVersion));
             this->physicalDevice = pd;
+            break;
         }
         
     }
@@ -132,28 +133,29 @@ void VulkanContext::init(GLFWwindow *window) {
 
     // DEVICE
 
-    std::optional<uint32_t> gi, pi, ti;
+    std::optional<uint32_t> ogi, opi, oti;
     int i = 0;
 
     for (auto family : physicalDevice.getQueueFamilyProperties()) {
-        if (!gi && family.queueFlags & vk::QueueFlagBits::eGraphics) {
-            gi = i;
+        if (!ogi && family.queueFlags & vk::QueueFlagBits::eGraphics) {
+            ogi = i;
         }
-        if (!ti && family.queueFlags & vk::QueueFlagBits::eTransfer) {
-            ti = i;
+        if (!oti && family.queueFlags & vk::QueueFlagBits::eTransfer) {
+            oti = i;
         }
-        if (!pi && physicalDevice.getSurfaceSupportKHR(i, surface)) {
-            pi = i;
+        if (!opi && physicalDevice.getSurfaceSupportKHR(i, surface)) {
+            opi = i;
         }
         i++;
     }
 
     std::vector<vk::DeviceQueueCreateInfo> queueCreateInfos;
     std::set indices = {
-        Unwrap(gi, "No suitable graphics queue"), 
-        Unwrap(pi, "No suitable present queue"), 
-        Unwrap(ti, "No suitable transfer queue")
+        Unwrap(ogi, "No suitable graphics queue"), 
+        Unwrap(opi, "No suitable present queue"), 
+        Unwrap(oti, "No suitable transfer queue")
     };
+    auto gi = ogi.value(), pi = opi.value(), ti = oti.value();
 
     float priority = 1.0f;
     for (auto fam : indices) {
@@ -182,12 +184,15 @@ void VulkanContext::init(GLFWwindow *window) {
 
     // QUEUES
 
-    this->graphicsQueue = Queue(this->device.getQueue(gi.value(), 0));
-    this->graphicsQueue.index = gi.value();
-    this->presentQueue = Queue(this->device.getQueue(pi.value(), 0));
-    this->presentQueue.index = pi.value();
-    this->transferQueue = Queue(this->device.getQueue(ti.value(), 0));
-    this->transferQueue.index = ti.value();
+    this->graphicsQueue = Queue(this->device.getQueue(gi, 0));
+    this->graphicsQueue.index = gi;
+    this->presentQueue = Queue(this->device.getQueue(pi, 0));
+    this->presentQueue.index = pi;
+    this->transferQueue = Queue(this->device.getQueue(ti, 0));
+    this->transferQueue.index = ti;
+    std::println("GraphicsQueue: {}", (void*)(VkQueue)graphicsQueue);
+    std::println("PresentQueue: {}", (void*)(VkQueue)presentQueue);
+    std::println("TransferQueue: {}", (void*)(VkQueue)transferQueue);
 
     // COMMAND POOLS
 
@@ -196,20 +201,25 @@ void VulkanContext::init(GLFWwindow *window) {
         this->transferQueue.index,
     };
 
-    this->transferCommandPool = this->device.createCommandPool(transferPoolInfo);
+    {
+        std::scoped_lock poolsLock{commandPoolMtx, transferCommandPoolMtx};
+        this->transferCommandPool = this->device.createCommandPool(transferPoolInfo);
+        std::println("TransferCommandPool: {}", (void*)transferCommandPool);
 
-    vk::CommandPoolCreateInfo poolInfo{
-        vk::CommandPoolCreateFlagBits::eResetCommandBuffer,
-        this->graphicsQueue.index
-    };
+        vk::CommandPoolCreateInfo poolInfo{
+            vk::CommandPoolCreateFlagBits::eResetCommandBuffer,
+            this->graphicsQueue.index
+        };
 
-    this->commandPool = this->device.createCommandPool(poolInfo);
+        this->commandPool = this->device.createCommandPool(poolInfo);
+        std::println("CommandPool: {}", (void*)commandPool);
+    }
 
-    vk::CommandBufferAllocateInfo allocInfo{
-        this->transferCommandPool,
-        vk::CommandBufferLevel::ePrimary,
-        1
-    };
+    // vk::CommandBufferAllocateInfo allocInfo{
+    //     this->transferCommandPool,
+    //     vk::CommandBufferLevel::ePrimary,
+    //     1
+    // };
 
     // DLDID
 
@@ -229,64 +239,36 @@ void VulkanContext::init(GLFWwindow *window) {
 }
 
 void VulkanContext::deinit() {
-    this->pruneDestructionQueue();
+    this->waitForTransfers();
+    while (not this->destruction_queue.empty()) {
+        this->destruction_queue.front().second.deinit(this->allocator);
+        this->destruction_queue.pop();
+    }
     vmaDestroyAllocator(this->allocator);
-    this->device.destroyCommandPool(this->commandPool);
-    this->device.destroyCommandPool(this->transferCommandPool);
+    {
+        std::scoped_lock poolsLock{commandPoolMtx, transferCommandPoolMtx};
+        this->device.destroyCommandPool(this->commandPool);
+        this->device.destroyCommandPool(this->transferCommandPool);
+    }
     this->device.destroy();
     this->instance.destroySurfaceKHR(this->surface);
     this->instance.destroy();
 }
 
-// void VulkanContext::beginTransferBatch() {
-//     g_DebugNameState.Name("Batch Transfer Command Buffer");
-//     batchTransferCommandBuffer = device.allocateCommandBuffers(vk::CommandBufferAllocateInfo{
-//         this->transferCommandPool,
-//         vk::CommandBufferLevel::ePrimary,
-//         1
-//     })[0];
-//     g_DebugNameState.NameCommandBuffer(batchTransferCommandBuffer);
-//     batchTransferCommandBuffer.begin(vk::CommandBufferBeginInfo{
-//         vk::CommandBufferUsageFlagBits::eOneTimeSubmit
-//     });
-// }
-
-// void VulkanContext::endTransferBatch() {
-//     batchTransferCommandBuffer.end();
-//     Transfer transfer;
-//     transfer.stagingBuffer.buffer = nullptr;
-
-//     vk::Fence uploadFence = this->device.createFence(vk::FenceCreateInfo{});
-//     // Submit
-//     vk::SubmitInfo submitInfo{};
-//     submitInfo.setCommandBuffers(batchTransferCommandBuffer);
-//     this->transferQueue.submit(submitInfo, uploadFence);
-
-//     // Store the transfer info for later synchronization
-//     transfer.cmdBuf = batchTransferCommandBuffer;
-//     transfer.fence = uploadFence;
-//     this->transfers.push(transfer);
-//     batchTransferCommandBuffer = nullptr;
-// }
-
 // Upload one or more buffers via one staging buffer and command buffer
-void VulkanContext::uploadBuffers(vk::ArrayProxy<Upload> uploads) {
-    std::lock_guard lock(uploadMtx);
-    bool createCmdBuf = batchTransferCommandBuffer == nullptr;
-    vk::CommandBuffer cmdBuf = batchTransferCommandBuffer;
+void VulkanContext::uploadBuffers(vk::ArrayProxy<const Upload> uploads) {
+    std::scoped_lock lock{transferCommandPoolMtx, uploadMtx};
     // Staging buffer
     Transfer transfer;
     size_t stagingSize = 0;
     for (const auto &upload : uploads) {
         stagingSize += upload.dst.size;
     }
-
-    transfer.stagingBuffer.initHost(*this, 
+    transfer.stagingBuffer.initHost("Staging Buffer", *this, 
         stagingSize, 
         vk::BufferUsageFlagBits::eTransferSrc
     );
     assert(transfer.stagingBuffer.info.pMappedData != nullptr);
-    if (!createCmdBuf) this->queueDestroy(transfer.stagingBuffer);
 
     size_t offset = 0;
     for (const auto &upload : uploads) {
@@ -294,17 +276,14 @@ void VulkanContext::uploadBuffers(vk::ArrayProxy<Upload> uploads) {
         offset += upload.dst.size;
     }
     
-    // Command buffer
-    if (createCmdBuf) {
-        cmdBuf = device.allocateCommandBuffers(vk::CommandBufferAllocateInfo{
-            this->transferCommandPool,
-            vk::CommandBufferLevel::ePrimary,
-            1
-        })[0];
-        cmdBuf.begin(vk::CommandBufferBeginInfo{
-            vk::CommandBufferUsageFlagBits::eOneTimeSubmit
-        });
-    }
+    vk::CommandBuffer cmdBuf = device.allocateCommandBuffers(vk::CommandBufferAllocateInfo{
+        this->transferCommandPool,
+        vk::CommandBufferLevel::ePrimary,
+        1
+    })[0];
+    cmdBuf.begin(vk::CommandBufferBeginInfo{
+        vk::CommandBufferUsageFlagBits::eOneTimeSubmit
+    });
 
     // Copy
     offset = 0;
@@ -318,23 +297,21 @@ void VulkanContext::uploadBuffers(vk::ArrayProxy<Upload> uploads) {
         offset += upload.dst.size;
     }
 
-    if (createCmdBuf) {
-        cmdBuf.end();
+    cmdBuf.end();
 
-        vk::Fence uploadFence = this->device.createFence(vk::FenceCreateInfo{});
-        // Submit
-        {
-            std::lock_guard lock(submitMtx);
-            vk::SubmitInfo submitInfo{};
-            submitInfo.setCommandBuffers(cmdBuf);
-            this->transferQueue.submit(submitInfo, uploadFence);
-        }
-
-        // Store the transfer info for later synchronization
-        transfer.cmdBuf = cmdBuf;
-        transfer.fence = uploadFence;
-        this->transfers.push(transfer);
+    vk::Fence uploadFence = this->device.createFence(vk::FenceCreateInfo{});
+    // Submit
+    {
+        std::lock_guard lock(transferQueueMtx());
+        vk::SubmitInfo submitInfo{};
+        submitInfo.setCommandBuffers(cmdBuf);
+        this->transferQueue.submit(submitInfo, uploadFence);
     }
+
+    // Store the transfer info for later synchronization
+    transfer.cmdBuf = cmdBuf;
+    transfer.fence = uploadFence;
+    this->transfers.push(transfer);
     uploadMtx.unlock();
 }
 
@@ -347,7 +324,7 @@ void VulkanContext::waitForTransfers() {
     //     this->device.destroyFence(transfer.fence);
     //     transfers.pop();
     // }
-    std::lock_guard lock(uploadMtx);
+    std::lock_guard lock(transferCommandPoolMtx); // ... why is this locked???
 
     while (!transfers.empty() && this->device.getFenceStatus(transfers.front().fence) == vk::Result::eSuccess) {
         auto transfer = transfers.front();
@@ -362,19 +339,11 @@ void VulkanContext::waitForTransfers() {
 
 void VulkanContext::pruneDestructionQueue() {
     while (not destruction_queue.empty()) {
-        auto [frame, item] = destruction_queue.front();
+        auto &[frame, buf] = destruction_queue.front();
         if (currentFrame - frame <= FRAME_COUNT) return;
-        using enum Variant::Type;
-        switch (item.type) {
-            case eAllocBuffer: 
-                item.value.allocBuffer.deinit(allocator); 
-                break;
-            case eMallocPtr: 
-                std::println("Placeholder: Freeing eMallocPtr from Destruction Queue on Frame: {}", currentFrame);
-                break;
-        }   
+        buf.deinit(allocator);
         destruction_queue.pop();
     }
 }
 
-void VulkanContext::queueDestroy(Variant var) { destruction_queue.push({currentFrame, var}); };
+void VulkanContext::queueDestroy(AllocBuffer buf) { destruction_queue.push({currentFrame, buf}); };

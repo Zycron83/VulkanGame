@@ -2,9 +2,10 @@
 
 #include <array>
 #include <condition_variable>
+#include <mutex>
 #include <memory>
 #include <unordered_map>
-#include <deque>
+// ... Switch to deque eventually?
 
 #include <glm/vec3.hpp>
 #include <glm/gtx/hash.hpp>
@@ -14,6 +15,8 @@
 #include "Context.h"
 
 constexpr int CHUNK_LENGTH = 32;
+constexpr int CHUNK_BOTTOM = 0;
+constexpr int CHUNK_TOP = 2;
 
 enum class Block : uint8_t {
     Invalid = 0, Air = 0, Grass, Dirt, Stone
@@ -22,16 +25,14 @@ static bool transparent(Block b) {
     return b <= Block::Air;
 }
 enum Dir {
-    X_POS, X_NEG,
-    Y_POS, Y_NEG,
-    Z_POS, Z_NEG,
+    X_POS, // Z, Y
+    X_NEG, // Z, Y
+    Y_POS, // X, Z
+    Y_NEG, // X, Z
+    Z_POS, // Y, X
+    Z_NEG, // Y, X
 };
 
-enum QueueOp : uint8_t {
-    NONE,
-    FILL,
-    UPDATE_MESH,
-};
 namespace std {
     template<typename T, int N, int M = N>
     using array2 = array<array<T, M>, N>;
@@ -42,24 +43,23 @@ struct Chunk {
     std::array2<uint32_t, CHUNK_LENGTH> opaquenessMask_Y; // X, Z
     std::array2<uint32_t, CHUNK_LENGTH> opaquenessMask_Z; // Y, X
     std::array2<uint32_t, CHUNK_LENGTH> opaquenessMask_X; // Z, Y
-    // std::array2<Block, CHUNK_LENGTH> border_X_POS; // Z, Y
-    // std::array2<Block, CHUNK_LENGTH> border_X_NEG; // Z, Y
-    // std::array2<Block, CHUNK_LENGTH> border_Y_POS; // X, Z
-    // std::array2<Block, CHUNK_LENGTH> border_Y_NEG; // X, Z
-    // std::array2<Block, CHUNK_LENGTH> border_Z_POS; // X, Y
-    // std::array2<Block, CHUNK_LENGTH> border_Z_BEG; // X, Y
+    std::array2<uint32_t, 6, CHUNK_LENGTH> borderMasks;
+    // std::optional<std::array<uint32_t, CHUNK_LENGTH>> borderMask_X_POS; 
+    // std::optional<std::array<uint32_t, CHUNK_LENGTH>> borderMask_X_NEG; 
+    // std::optional<std::array<uint32_t, CHUNK_LENGTH>> borderMask_Y_POS; 
+    // std::optional<std::array<uint32_t, CHUNK_LENGTH>> borderMask_Y_NEG; 
+    // std::optional<std::array<uint32_t, CHUNK_LENGTH>> borderMask_Z_POS; 
+    // std::optional<std::array<uint32_t, CHUNK_LENGTH>> borderMask_Z_BEG; 
     std::array<Chunk *, 6> neighbourChunks;
     AllocBuffer vertexBuffer;
     AllocBuffer indexBuffer;
     size_t vertexCount = 0, indexCount = 0;
-    std::atomic<bool> inQueue = false;
-    std::mutex chunkMtx;
-    QueueOp queueOp = QueueOp::NONE;
     
     glm::ivec3 chunkCoord;
 
-    void init(const VulkanContext &);
+    Chunk();
     void deinit(VulkanContext &);
+    ~Chunk();
 
     inline Block getBlock(int, int, int) const;
     inline Block getBlock(glm::ivec3) const;
@@ -74,31 +74,50 @@ struct Chunk {
     constexpr size_t size();
 };
 
-struct Terrain {
-    std::unordered_map<glm::ivec3, std::shared_ptr<Chunk>> chunks;
-    std::mutex chunkMtx;
-    std::deque<std::shared_ptr<Chunk>> chunkMeshQueue;
-    std::mutex queueMtx;
+/*
+    UNINIT, data == nullopt
+    EMPTY, data.value == null
+    FILLED, data != null
+    MESHED, vertexCount >= 0
+*/
+
+struct ThreadPool {
+    using QueueItem = std::unique_ptr<Chunk>;
+    using ResultItem = QueueItem;
+
+    std::mutex inputMtx, outputMtx;
+    std::queue<QueueItem> input, output;
     std::condition_variable queueCond;
-    std::thread chunkQueueProcessor;
-    std::atomic<bool> stopThread = false;
+    
+    std::atomic<bool> stopThreadPool = false;
+    std::vector<std::thread> threads;
 
-    void dirtyChunk(std::shared_ptr<Chunk>, QueueOp);
-    static void processChunks(Terrain *, VulkanContext *); // chunk processing thread
+    void submit(QueueItem item);
+    std::vector<ResultItem> &getResults();
+};
 
-    void init(VulkanContext &);
+struct Terrain {
+    std::unordered_map<glm::ivec3, std::optional<std::unique_ptr<Chunk>>> chunks; // nullopt when being processed by other threads
+    
+    ThreadPool threadPool;
+    
+    VulkanContext *vkc;
 
-    void loadChunksAround(VulkanContext &, const glm::ivec3);
-    void loadChunk(const VulkanContext &, const glm::ivec3);
-    void unloadChunk(VulkanContext &, const glm::ivec3);
+    void queueChunk(std::unique_ptr<Chunk>);
+
+    void init(VulkanContext *);
+
+    void loadChunksAround(const glm::ivec3);
+    void loadChunk(const glm::ivec3);
+    void unloadChunk(std::unique_ptr<Chunk>);
     // void writeMesh(VulkanContext &, std::shared_ptr<Chunk>);
-    void writeMesh(VulkanContext &, glm::ivec3);
+    void writeMesh(Chunk *chunk);
 
-    void tickFrame(VulkanContext &, const Camera &camera);
+    void tickFrame(const Camera &camera);
     void draw(vk::CommandBuffer);
 
 
-    void deinit(VulkanContext &);
+    void deinit();
 
 };
 

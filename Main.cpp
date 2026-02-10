@@ -8,13 +8,13 @@
 #include "imgui.h"
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_vulkan.h"
+#include <numeric>
 #endif
 
 #include <iostream>
 #include <print>
 #include <chrono>
 #include <thread>
-#include <numeric>
 
 // #include <sanitizer/lsan_interface.h>
 
@@ -131,7 +131,8 @@ void cleanup() {
 
 int main(int argc, char* argv[])
 {
-    glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
+    glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_WAYLAND);
+    glfwInitHint(GLFW_WAYLAND_LIBDECOR, GLFW_FALSE);
     glfwInit();
 
     glfwSetErrorCallback(ErrorEvent);
@@ -145,7 +146,7 @@ int main(int argc, char* argv[])
 
     /* Create the window */
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
+    glfwWindowHint(GLFW_DECORATED, GLFW_TRUE);
     window = glfwCreateWindow(windowExtent.width, windowExtent.height, "Hello World", nullptr, nullptr);
     if (!window) {
         const char * what;
@@ -221,7 +222,7 @@ int main(int argc, char* argv[])
                 Text("Frame Time: %.2f ms", std::accumulate(frametimes.begin(), frametimes.end(), 0.0) / frametimes.size());
                 Text("Triangles: %zu", g_DebugFrameStats.index_count / 3);
                 Text("Chunk Memory: %.2lu MB", g_Settings.chunkBytes.load() / 1024 / 1024);
-                Text("Chunks in Queue: %zu", g_Renderer->terrain.chunkMeshQueue.size());
+                Text("Chunks in Queue: %zu", g_Renderer->terrain.threadPool.input.size());
                 End();
 
                 // Begin("Noise Settings");
@@ -239,11 +240,11 @@ int main(int argc, char* argv[])
             #endif
             if (g_Settings.Noise != prev_NoiseSettings) {
                 prev_NoiseSettings = g_Settings.Noise;
-                g_Renderer->terrain.deinit(g_Renderer->vkc);
-                g_Renderer->terrain.init(g_Renderer->vkc);
+                g_Renderer->terrain.deinit();
+                g_Renderer->terrain.init(&g_Renderer->vkc);
             }
             g_DebugFrameStats.index_count = 0;
-            g_Renderer->terrain.tickFrame(g_Renderer->vkc, *g_Renderer->camera.get());
+            g_Renderer->terrain.tickFrame(*g_Renderer->camera.get());
             g_Renderer->vkc.waitForTransfers();
             g_Renderer->drawFrame();
 
@@ -264,6 +265,11 @@ int main(int argc, char* argv[])
     }
     catch (std::runtime_error &expt) {
         std::cerr << "[Runtime Error!] :: " << expt.what() << std::endl;
+        cleanup();
+        return 1;
+    }
+    catch (std::logic_error &expt) {
+        std::cerr << "[Logic Error!] :: " << expt.what() << std::endl;
         cleanup();
         return 1;
     }

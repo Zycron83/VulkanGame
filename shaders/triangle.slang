@@ -23,6 +23,12 @@ struct UniformBuffer
 };
 [[vk_binding(0, 0)]] ConstantBuffer<UniformBuffer, ScalarDataLayout> ubo;
 
+enum Dir {
+    X_POS, X_NEG,
+    Y_POS, Y_NEG,
+    Z_POS, Z_NEG
+};
+
 // Vertex shader
 [shader("vertex")]
 VertexOutput vertexMain(VertexInput input, uint index : SV_VertexID)
@@ -37,15 +43,19 @@ VertexOutput vertexMain(VertexInput input, uint index : SV_VertexID)
     return output;
 }
 
+bool eq(float x, float y) {
+    return abs(x - y) < 0.01;
+}
+
 // Fragment shader
 [shader("fragment")]
 float4 fragmentMain(VertexOutput input) : SV_Target
 {
     // up
-    if (input.normal.y == 1) { return float4(float3(1.0), 1); }
-    if (input.normal.x == 1 
-    ||  input.normal.z == 1) { return float4(float3(0.8), 1); }
-    if (input.normal.x == -1 
-    || input.normal.z == -1) { return float4(float3(0.5), 1); }
+    if (eq(input.normal.y,  1)) { return float4(float3(1.0), 1); }
+    if (eq(input.normal.x,  1) 
+    ||  eq(input.normal.z,  1)) { return float4(float3(0.8), 1); }
+    if (eq(input.normal.x, -1) 
+    ||  eq(input.normal.z, -1)) { return float4(float3(0.5), 1); }
     return float4(float3(0.8,0.1,0.8), 1);
 }

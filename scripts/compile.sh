@@ -15,7 +15,7 @@ touch $MARKER_FILE
 
 if ! [[ -d build ]]; then
     mkdir build
-    cmake -B build
+    cmake -S . -B build -G Ninja
 fi
     
 cmake --build build

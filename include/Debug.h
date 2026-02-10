@@ -29,7 +29,7 @@ struct Settings {
 };
 
 #define NAME_OBJ_FUNC(obj) \
-    void Name##obj(Vk##obj object) { \
+    void Name##obj(const VulkanContext *vkc, Vk##obj object) { \
         if (this->name == nullptr) return; \
         std::string debugName; \
         for (const auto &n : nameStack) { \
@@ -42,7 +42,7 @@ struct Settings {
             (uint64_t)object, \
             debugName.c_str() \
         }; \
-        SetDebugName(nameInfo); \
+        SetDebugName(vkc, nameInfo); \
         this->name = nullptr; \
     }
 
@@ -51,7 +51,6 @@ struct VulkanContext;
 struct DebugNameState {
     std::vector<const char *> nameStack;
     char * name;
-    VulkanContext *vkc;
 
     void Push(const char *name) {
         nameStack.push_back(name);
@@ -67,10 +66,12 @@ struct DebugNameState {
 
     NAME_OBJ_FUNC(Buffer)
     NAME_OBJ_FUNC(CommandBuffer)
+    NAME_OBJ_FUNC(Queue)
+    NAME_OBJ_FUNC(CommandPool)
 
-    void SetDebugName(vk::DebugUtilsObjectNameInfoEXT &) const;
+    void SetDebugName(const VulkanContext *vkc, vk::DebugUtilsObjectNameInfoEXT &) const;
 };
 
 struct DebugFrameStats {
-    size_t index_count;
+    std::atomic<size_t> index_count;
 };

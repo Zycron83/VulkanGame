@@ -90,8 +90,7 @@ Renderer::Renderer(GLFWwindow *window) {
 	
 	std::println("Initting!");
 	vkc.init(window);
-	g_DebugNameState.vkc = &vkc;
-	terrain.init(vkc);
+	terrain.init(&vkc);
 	
 	int w, h;
 	glfwGetFramebufferSize(window, &w, &h);
@@ -131,7 +130,7 @@ Renderer::~Renderer() {
 		dev.destroySemaphore(semaphore);
 	}
 	dev.destroyPipeline(graphicsPipeline);
-	terrain.deinit(vkc);
+	terrain.deinit();
 	vkc.deinit();
 }
 
@@ -152,13 +151,15 @@ struct UniformBufferObject {
 } ubo;
 
 void Renderer::initUniformBuffers() {
+	int i = 0;
 	for (auto &frame : vkc.frames) {
-		frame.uniformBuffer.init(vkc, 
+		frame.uniformBuffer.init(std::format("Uniform Buffer for Frame {}", i), vkc, 
 			sizeof(ubo),
 			vk::BufferUsageFlagBits::eUniformBuffer,
 			VMA_MEMORY_USAGE_AUTO,
 			VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT
 		);
+		i++;
 	}
 }
 
@@ -460,7 +461,10 @@ void Renderer::recordCommandBuffer(vk::CommandBuffer commandBuffer, uint32_t ima
 	terrain.draw(commandBuffer);
 
 	#ifdef IMGUI_ENABLE
-	ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), commandBuffer);
+	{
+		std::lock_guard lock{vkc.graphicsQueueMtx()};
+		ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), commandBuffer);
+	}
 	#endif
 
 	commandBuffer.endRendering();
@@ -525,15 +529,16 @@ void Renderer::drawFrame() {
     };
 
     {
-        std::lock_guard lock(vkc.submitMtx);
+        std::lock_guard lock(vkc.graphicsQueueMtx());
         vkc.graphicsQueue.submit2(submitInfo, frame.inFlightFence);
-
-        vk::PresentInfoKHR presentInfo{
+	}
+	{
+		std::lock_guard lock(vkc.presentQueueMtx());
+		vk::PresentInfoKHR presentInfo{
             renderFinishedSemaphores[imageIndex],
             this->swapchain,
             imageIndex
         };
-
         result = vkc.presentQueue.presentKHR(presentInfo);
     }
     if (result != vk::Result::eSuccess) {

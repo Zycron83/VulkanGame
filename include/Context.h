@@ -14,9 +14,28 @@ struct VulkanContext {
     vk::Device device;
     struct Queue : vk::Queue {
         uint32_t index;
+        bool operator==(Queue lhs) {
+            return (vk::Queue)lhs == (vk::Queue)*this;
+        }
     };
+    // ... add queue mutexes
     Queue graphicsQueue, presentQueue, transferQueue;
+    std::mutex queueMtx1, queueMtx2, queueMtx3;
+    std::mutex &graphicsQueueMtx() {
+        return queueMtx1;
+    }
+    std::mutex &presentQueueMtx() {
+        if (graphicsQueue == presentQueue) return queueMtx1;
+        return queueMtx2;
+    }
+    std::mutex &transferQueueMtx() {
+        if (graphicsQueue == transferQueue) return queueMtx1;
+        if (presentQueue == transferQueue) return queueMtx2;
+        return queueMtx3;
+    }
+    std::mutex createMtx;
     vk::CommandPool transferCommandPool;
+    std::mutex transferCommandPoolMtx; // ... create multiple pools for each thread instead.
     struct Transfer {
         vk::CommandBuffer cmdBuf;
         vk::Fence fence;
@@ -24,6 +43,7 @@ struct VulkanContext {
     };
     std::queue<Transfer> transfers;
     vk::CommandPool commandPool;
+    std::mutex commandPoolMtx;
     vk::detail::DispatchLoaderDynamic dldid;
     VmaAllocator allocator;
     constexpr static size_t FRAME_COUNT = 2;
@@ -40,33 +60,17 @@ struct VulkanContext {
     void init(GLFWwindow *);
     void deinit();
 
-    struct Variant;
-    std::queue<std::pair<size_t, Variant>> destruction_queue;
+    std::queue<std::pair<size_t, AllocBuffer>> destruction_queue;
 
     struct Upload { 
         AllocBuffer dst;  
         const void* src; 
     };
-    vk::CommandBuffer batchTransferCommandBuffer = nullptr;
     void beginTransferBatch();
     void endTransferBatch();
     std::mutex uploadMtx;
-    std::mutex submitMtx;
-    void uploadBuffers(vk::ArrayProxy<Upload>);
+    void uploadBuffers(vk::ArrayProxy<const Upload>);
     void waitForTransfers();
     void pruneDestructionQueue();
-    void queueDestroy(Variant);
-};
-
-struct VulkanContext::Variant {
-    enum Type {
-        eAllocBuffer,
-        eMallocPtr
-    } type;
-    union {
-        AllocBuffer allocBuffer;
-        void *mallocPtr;
-    } value;
-    Variant(AllocBuffer buf) : type{eAllocBuffer}, value{ .allocBuffer = buf } {}
-    Variant(void *ptr) : type{eMallocPtr}, value{ .mallocPtr = ptr } {}
+    void queueDestroy(AllocBuffer);
 };

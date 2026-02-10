@@ -11,11 +11,13 @@ struct AllocBuffer {
     VmaAllocationInfo info;
     size_t size;
     vk::DeviceAddress address;
+    std::string name;
 
-    void initHost(const VulkanContext &vkc, size_t size, vk::BufferUsageFlags usage);
-    void initDevice(const VulkanContext &vkc, size_t size, vk::BufferUsageFlags usage);
+    void initHost(std::string name, VulkanContext &vkc, size_t size, vk::BufferUsageFlags usage);
+    void initDevice(std::string name, VulkanContext &vkc, size_t size, vk::BufferUsageFlags usage);
     void init(
-        const VulkanContext &vkc, 
+        std::string name,
+        VulkanContext &vkc, 
         size_t size, 
         vk::BufferUsageFlags usage, 
         VmaMemoryUsage memUsage = VMA_MEMORY_USAGE_AUTO,
@@ -24,6 +26,8 @@ struct AllocBuffer {
 
     void deinit(VmaAllocator allocator) {
         vmaDestroyBuffer(allocator, buffer, alloc);
-        memset((void*)this, 0, sizeof(*this));
+        // std::println("Deinit Buffer {}", name);
+        buffer = nullptr;
+        size = 0;
     }
 };
