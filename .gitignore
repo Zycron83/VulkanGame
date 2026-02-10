@@ -4,6 +4,7 @@ build
 
 Test.cpp
 a.out
+Notes.md
 
 imgui.ini
 AGENTS.md

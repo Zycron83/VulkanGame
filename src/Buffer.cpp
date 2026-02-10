@@ -1,11 +1,9 @@
 #include "Buffer.h"
 #include "Context.h"
-#include "Debug.h"
+#include "Util.hpp"
 
 #include <mutex>
 #include <print>
-
-extern DebugNameState g_DebugNameState;
 
 void AllocBuffer::initHost(std::string name, VulkanContext &vkc, size_t size, vk::BufferUsageFlags usage) {
     this->init(name, vkc, size, usage, VMA_MEMORY_USAGE_AUTO_PREFER_HOST, 
@@ -48,7 +46,12 @@ void AllocBuffer::init(
     if (result != VkResult::VK_SUCCESS) {
         std::println("vmaCreateBuffer FAILED for {}", name);
     }
-    g_DebugNameState.NameBuffer(&vkc, buffer);
+    vk::DebugUtilsObjectNameInfoEXT nameInfo{
+        vk::ObjectType::eBuffer, 
+        (uint64_t)(VkBuffer)buffer, 
+        name.c_str()
+    };
+    Unwrap(vkc.device.setDebugUtilsObjectNameEXT(&nameInfo, vkc.dldid), "Buffer debug naming failed");
     // std::println("Init Buffer {}", this->name); // -R
 
 }

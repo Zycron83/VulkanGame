@@ -27,8 +27,6 @@
 
 #include "Renderer.h"
 #include "Vertex.h"
-#include "Debug.h"
-extern DebugNameState g_DebugNameState;
 
 #include <Util.hpp>
 #include <Terrain.h>

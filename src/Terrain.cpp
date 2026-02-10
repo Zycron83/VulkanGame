@@ -385,7 +385,7 @@ void Terrain::loadChunksAround(const glm::ivec3 centerChunkCoord) {
     static glm::ivec3 lastCenter = glm::ivec3{INT_MAX};
     if (centerChunkCoord == lastCenter) return;
     else lastCenter = centerChunkCoord;
-    std::println("Loading chunks around [{}, {}, {}]", centerChunkCoord.x, centerChunkCoord.y, centerChunkCoord.z);
+    // std::println("Loading chunks around [{}, {}, {}]", centerChunkCoord.x, centerChunkCoord.y, centerChunkCoord.z);
 
     const auto L = [](int x, int z) {
         // return abs(x) + abs(z);

@@ -14,8 +14,6 @@
 
 #include "Context.h"
 #include "Util.hpp"
-#include "Debug.h"
-extern DebugNameState g_DebugNameState;
 
 static const std::array validationLayers = {
 	"VK_LAYER_KHRONOS_validation",
