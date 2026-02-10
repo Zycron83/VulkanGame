@@ -13,11 +13,11 @@ set(CMAKE_BUILD_TYPE "Debug")
 add_executable(VulkanGame)
 file(GLOB SRC_FILES "src/*.cpp")
 target_sources(VulkanGame PRIVATE Main.cpp ${SRC_FILES})
-file(GLOB ImGui_SRC_FILES "imgui/*.cpp")
+file(GLOB ImGui_SRC_FILES "vendor/imgui/*.cpp")
 target_sources(VulkanGame PRIVATE 
     ${ImGui_SRC_FILES}
-    imgui/backends/imgui_impl_glfw.cpp imgui/backends/imgui_impl_vulkan.cpp
-    simplex-noise/SimplexNoise.cpp
+    vendor/imgui/backends/imgui_impl_glfw.cpp vendor/imgui/backends/imgui_impl_vulkan.cpp
+    vendor/simplex-noise/SimplexNoise.cpp
 )
 # file(GLOB CPPM_FILES "modules/*.cppm")
 # target_sources(VulkanGame PRIVATE 
@@ -51,18 +51,14 @@ include(FindVulkan)
 target_include_directories(VulkanGame PRIVATE 
     include
     "${Vulkan_INCLUDE_DIRS}"
-    "GLM/include"
-    "imgui"
-    "simplex-noise/include"
+    "vendor/GLM/include"
+    "vendor/imgui"
+    "vendor/simplex-noise/include"
 )
-if(APPLE)
-    target_include_directories(VulkanGame PRIVATE "GLFW_3.4/include")
-    find_library(GLFW_LIB glfw3 PATHS "GLFW_3.4/lib-arm64")
-else()
-    target_link_libraries(VulkanGame PRIVATE glfw)
-endif()
+
+target_link_libraries(VulkanGame PRIVATE glfw)
 # add_subdirectory("VMA_3.3")
-set(VulkanMemoryAllocator_DIR VMA_3.3/build/install/share/cmake/VulkanMemoryAllocator)
+set(VulkanMemoryAllocator_DIR vendor/VMA_3.3/build/install/share/cmake/VulkanMemoryAllocator)
 find_package(VulkanMemoryAllocator CONFIG REQUIRED)
 target_link_libraries(VulkanGame PRIVATE Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator)
 
