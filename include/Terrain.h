@@ -2,10 +2,14 @@
 
 #include <array>
 #include <condition_variable>
+#include <glm/detail/qualifier.hpp>
+#include <glm/glm.hpp>
+#include <limits>
 #include <mutex>
 #include <memory>
+#include <deque>
 #include <unordered_map>
-// ... Switch to deque eventually?
+#include <format>
 
 #include <glm/vec3.hpp>
 #include <glm/gtx/hash.hpp>
@@ -17,6 +21,8 @@
 constexpr int CHUNK_LENGTH = 32;
 constexpr int CHUNK_BOTTOM = 0;
 constexpr int CHUNK_TOP = 2;
+using ChunkCoord = glm::ivec3;
+using InnerCoord = glm::ivec3;
 
 enum class Block : uint8_t {
     Invalid = 0, Air = 0, Grass, Dirt, Stone
@@ -40,38 +46,68 @@ namespace std {
 
 struct Chunk {
     std::unique_ptr<std::array<Block, CHUNK_LENGTH * CHUNK_LENGTH * CHUNK_LENGTH>> data; // doubles as validity check
-    std::array2<uint32_t, CHUNK_LENGTH> opaquenessMask_Y; // X, Z
-    std::array2<uint32_t, CHUNK_LENGTH> opaquenessMask_Z; // Y, X
-    std::array2<uint32_t, CHUNK_LENGTH> opaquenessMask_X; // Z, Y
-    std::array2<uint32_t, 6, CHUNK_LENGTH> borderMasks;
+    std::array2<uint32_t, CHUNK_LENGTH> opaquenessMask_Y{0}; // X, Z
+    std::array2<uint32_t, CHUNK_LENGTH> opaquenessMask_Z{0}; // Y, X
+    std::array2<uint32_t, CHUNK_LENGTH> opaquenessMask_X{0}; // Z, Y
+    std::array2<uint32_t, 6, CHUNK_LENGTH> borderMasks{0};
     // std::optional<std::array<uint32_t, CHUNK_LENGTH>> borderMask_X_POS; 
     // std::optional<std::array<uint32_t, CHUNK_LENGTH>> borderMask_X_NEG; 
     // std::optional<std::array<uint32_t, CHUNK_LENGTH>> borderMask_Y_POS; 
     // std::optional<std::array<uint32_t, CHUNK_LENGTH>> borderMask_Y_NEG; 
     // std::optional<std::array<uint32_t, CHUNK_LENGTH>> borderMask_Z_POS; 
     // std::optional<std::array<uint32_t, CHUNK_LENGTH>> borderMask_Z_BEG; 
-    std::array<Chunk *, 6> neighbourChunks;
+    std::array<Chunk *, 6> neighbourChunks{0};
     AllocBuffer vertexBuffer;
     AllocBuffer indexBuffer;
     size_t vertexCount = 0, indexCount = 0;
+    std::atomic<bool> filled = false;
+    std::atomic<bool> meshed = false;
     
-    glm::ivec3 chunkCoord;
+    ChunkCoord chunkCoord;
 
-    Chunk();
+    Chunk(ChunkCoord);
     void deinit(VulkanContext &);
     ~Chunk();
 
     inline Block getBlock(int, int, int) const;
-    inline Block getBlock(glm::ivec3) const;
+    inline Block getBlock(InnerCoord) const;
 
     inline void setBlock(Block, int, int, int);
-    inline void setBlock(Block, glm::ivec3);
+    inline void setBlock(Block, InnerCoord);
 
-    inline static glm::ivec3 coordFromIndex(int);
+    inline static InnerCoord coordFromIndex(int);
 
     void fillChunk();
+    void writeMesh(VulkanContext &vkc);
 
-    constexpr size_t size();
+};
+// template <glm::length_t L, typename T, glm::qualifier Q> 
+// struct std::formatter<glm::vec<L, T, Q>> : std::range_formatter<T> {
+// 	constexpr auto parse(auto &ctx) {
+// 		return ctx.begin();
+// 	}
+
+// 	auto format(const glm::vec<L, T, Q> &vec, auto &ctx) {
+// 		return std::range_formatter<T>(std::span(&vec, L), ctx);
+// 	}
+// };
+template<>
+struct std::formatter<Chunk> {
+    constexpr auto parse(std::format_parse_context &ctx) {
+		return ctx.begin();
+	}
+    auto format(const Chunk &chunk, std::format_context& ctx) const {
+        return std::format_to(std::move(ctx.out()), "[{}, {}, {}]", chunk.chunkCoord.x, chunk.chunkCoord.y, chunk.chunkCoord.z);
+    }
+};
+template<>
+struct std::formatter<ChunkCoord> {
+    constexpr auto parse(std::format_parse_context &ctx) {
+		return ctx.begin();
+	}
+    auto format(const ChunkCoord &coord, std::format_context& ctx) const {
+        return std::format_to(std::move(ctx.out()), "[{}, {}, {}]", coord.x, coord.y, coord.z);
+    }
 };
 
 /*
@@ -81,43 +117,38 @@ struct Chunk {
     MESHED, vertexCount >= 0
 */
 
-struct ThreadPool {
-    using QueueItem = std::unique_ptr<Chunk>;
+struct ChunkThread {
+    enum class Action : bool { FILL, MESH };
+    using QueueItem = std::pair<Action, ChunkCoord>;
     using ResultItem = QueueItem;
 
-    std::mutex inputMtx, outputMtx;
-    std::queue<QueueItem> input, output;
+    std::mutex queueMtx;
     std::condition_variable queueCond;
-    
-    std::atomic<bool> stopThreadPool = false;
-    std::vector<std::thread> threads;
+    std::deque<QueueItem> queue;
 
-    void submit(QueueItem item);
-    std::vector<ResultItem> &getResults();
+    std::mutex chunksMtx;
+    std::unordered_map<ChunkCoord, std::unique_ptr<Chunk>> chunks;
+
+    // mutex maybe? ...
+    ChunkCoord centerChunkCoord = ChunkCoord{std::numeric_limits<int>::max()};
+    std::atomic<bool> updateCenter;
+    
+    std::atomic<bool> stopThread = false;
+    std::thread thread;
+    
+    void loadAround(VulkanContext &, const ChunkCoord);
 };
 
 struct Terrain {
-    std::unordered_map<glm::ivec3, std::optional<std::unique_ptr<Chunk>>> chunks; // nullopt when being processed by other threads
+    VulkanContext &vkc;
     
-    ThreadPool threadPool;
-    
-    VulkanContext *vkc;
+    ChunkThread chunkThread;
 
-    void queueChunk(std::unique_ptr<Chunk>);
-
-    void init(VulkanContext *);
-
-    void loadChunksAround(const glm::ivec3);
-    void loadChunk(const glm::ivec3);
-    void unloadChunk(std::unique_ptr<Chunk>);
-    // void writeMesh(VulkanContext &, std::shared_ptr<Chunk>);
-    void writeMesh(Chunk *chunk);
+    Terrain(VulkanContext &);
+    ~Terrain();
 
     void tickFrame(const Camera &camera);
     void draw(vk::CommandBuffer);
-
-
-    void deinit();
 
 };
 

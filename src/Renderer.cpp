@@ -2,6 +2,7 @@
 // 	#define VK_ENABLE_BETA_EXTENSIONS
 // #endif
 
+#include "vk_mem_alloc_enums.hpp"
 #include "vulkan/vulkan.hpp"
 #include <GLFW/glfw3.h>
 #include <glm/ext/matrix_clip_space.hpp>
@@ -17,6 +18,7 @@
 
 #define VMA_IMPLEMENTATION
 #include <vk_mem_alloc.h>
+#include <vk_mem_alloc.hpp>
 
 #include <iostream>
 #include <fstream>
@@ -74,7 +76,7 @@ void Renderer::initImGui() {
 	info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
 	info.UseDynamicRendering = true;
 	info.CheckVkResultFn = check_vk_result;
-	info.Allocator = vkc.allocator->GetAllocationCallbacks();
+	info.Allocator = {};
 	vk::PipelineRenderingCreateInfoKHR pipelineInfo{{}, swapchain.format, swapchain.depthBufferFormat};
 	info.PipelineRenderingCreateInfo = pipelineInfo;
 	info.PipelineCache = nullptr;
@@ -83,12 +85,9 @@ void Renderer::initImGui() {
 }
 #endif
 
-Renderer::Renderer(GLFWwindow *window) {
-	this->window = window;
+Renderer::Renderer(GLFWwindow *window) : window(window), vkc(window), terrain(vkc) {
 	
 	std::println("Initting!");
-	vkc.init(window);
-	terrain.init(&vkc);
 	
 	int w, h;
 	glfwGetFramebufferSize(window, &w, &h);
@@ -128,8 +127,6 @@ Renderer::~Renderer() {
 		dev.destroySemaphore(semaphore);
 	}
 	dev.destroyPipeline(graphicsPipeline);
-	terrain.deinit();
-	vkc.deinit();
 }
 
 void Renderer::resize() {
@@ -154,8 +151,8 @@ void Renderer::initUniformBuffers() {
 		frame.uniformBuffer.init(std::format("Uniform Buffer for Frame {}", i), vkc, 
 			sizeof(ubo),
 			vk::BufferUsageFlagBits::eUniformBuffer,
-			VMA_MEMORY_USAGE_AUTO,
-			VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT
+			vma::MemoryUsage::eAuto,
+			vma::AllocationCreateFlagBits::eHostAccessSequentialWrite | vma::AllocationCreateFlagBits::eMapped
 		);
 		i++;
 	}

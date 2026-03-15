@@ -6,6 +6,7 @@
 #include <vulkan/vulkan.hpp>
 
 #include "Buffer.h"
+#include "vk_mem_alloc_handles.hpp"
 
 struct VulkanContext {
     vk::Instance instance;
@@ -45,7 +46,7 @@ struct VulkanContext {
     vk::CommandPool commandPool;
     std::mutex commandPoolMtx;
     vk::detail::DispatchLoaderDynamic dldid;
-    VmaAllocator allocator;
+    vma::Allocator allocator;
     constexpr static size_t FRAME_COUNT = 2;
     size_t currentFrame = 0;
     size_t frameIndex() { return currentFrame % FRAME_COUNT; };
@@ -57,8 +58,8 @@ struct VulkanContext {
 	};
 	std::array<Frame, FRAME_COUNT> frames;
 
-    void init(GLFWwindow *);
-    void deinit();
+    VulkanContext(GLFWwindow *);
+    ~VulkanContext();
 
     std::queue<std::pair<size_t, AllocBuffer>> destruction_queue;
 

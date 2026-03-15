@@ -1,14 +1,16 @@
 #pragma once
 
+#include <print>
+
 #include <vulkan/vulkan.hpp>
-#include <vk_mem_alloc.h>
+#include <vk_mem_alloc.hpp>
 
 struct VulkanContext;
 
 struct AllocBuffer {
     vk::Buffer buffer;
-    VmaAllocation alloc;
-    VmaAllocationInfo info;
+    vma::Allocation alloc;
+    vma::AllocationInfo info;
     size_t size;
     vk::DeviceAddress address;
     std::string name;
@@ -20,13 +22,13 @@ struct AllocBuffer {
         VulkanContext &vkc, 
         size_t size, 
         vk::BufferUsageFlags usage, 
-        VmaMemoryUsage memUsage = VMA_MEMORY_USAGE_AUTO,
-        VmaAllocationCreateFlags allocFlags = 0
+        vma::MemoryUsage memUsage = vma::MemoryUsage::eAuto,
+        vma::AllocationCreateFlags allocFlags = {}
     );
 
-    void deinit(VmaAllocator allocator) {
-        vmaDestroyBuffer(allocator, buffer, alloc);
-        // std::println("Deinit Buffer {}", name);
+    void deinit(vma::Allocator allocator) {
+        allocator.destroyBuffer(buffer, alloc);
+        std::println("Deinit Buffer {}", name);
         buffer = nullptr;
         size = 0;
     }

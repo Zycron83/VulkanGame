@@ -2,7 +2,7 @@
 
 #include <GLFW/glfw3.h>
 #include <vulkan/vulkan.hpp>
-#include <vk_mem_alloc.h>
+#include <vk_mem_alloc.hpp>
 
 #include "Camera.hpp"
 #include "Buffer.h"

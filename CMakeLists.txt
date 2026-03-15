@@ -6,7 +6,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(BUILD_SHARED_LIBS ON)
 # set(CMAKE_CXX_SCAN_FOR_MODULES ON)
 set(CMAKE_BUILD_TYPE "Debug")
-# set(CMAKE_CXX_FLAGS "-fdiagnostics-color=always")
+set(CMAKE_CXX_FLAGS "-Wno-nullability-completeness")
 #set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<CONFIGURATION>")
 #set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<CONFIGURATION>")
 
@@ -32,7 +32,7 @@ target_sources(VulkanGame PRIVATE
 target_precompile_headers(VulkanGame PRIVATE 
     <vulkan/vulkan.hpp>
     <vulkan/vulkan_structs.hpp>
-    <vk_mem_alloc.h>
+    <vk_mem_alloc.hpp>
     <iostream>
     <ranges>
     
@@ -57,10 +57,14 @@ target_include_directories(VulkanGame PRIVATE
 )
 
 target_link_libraries(VulkanGame PRIVATE glfw)
-# add_subdirectory("VMA_3.3")
-set(VulkanMemoryAllocator_DIR vendor/VMA_3.3/build/install/share/cmake/VulkanMemoryAllocator)
-find_package(VulkanMemoryAllocator CONFIG REQUIRED)
-target_link_libraries(VulkanGame PRIVATE Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator)
+# set(VulkanMemoryAllocator_DIR vendor/VMA_3.3/build/install/share/cmake/VulkanMemoryAllocator)
+# find_package(VulkanMemoryAllocator CONFIG REQUIRED)
+# target_link_libraries(VulkanGame PRIVATE Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator)
+add_subdirectory("vendor/VulkanMemoryAllocator-Hpp")
+target_link_libraries(VulkanGame PRIVATE Vulkan::Vulkan VulkanMemoryAllocator-Hpp::VulkanMemoryAllocator-Hpp)
+target_include_directories(VulkanGame PRIVATE vendor/cpptrace/include)
+target_link_directories(VulkanGame PRIVATE vendor/cpptrace/lib)
+target_link_libraries(VulkanGame PRIVATE cpptrace dwarf)
 
 # include(FetchContent)
 # FetchContent_Declare(

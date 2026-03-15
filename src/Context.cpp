@@ -1,7 +1,7 @@
 #include <vulkan/vulkan.hpp>
 #include <GLFW/glfw3.h>
 
-#include <vk_mem_alloc.h>
+#include <vk_mem_alloc.hpp>
 
 #include <cstdint>
 #include <mutex>
@@ -32,8 +32,7 @@ static const std::array requiredExtensions = {
 	#endif
 };
 
-void VulkanContext::init(GLFWwindow *window) {
-    
+VulkanContext::VulkanContext(GLFWwindow *window) {
     // INSTANCE
     
     auto availableLayers = vk::enumerateInstanceLayerProperties();
@@ -52,9 +51,11 @@ void VulkanContext::init(GLFWwindow *window) {
 
 	std::println("Getting required extensions from GLFW");
 	uint32_t extCount;
-	auto extNames = Unwrap(glfwGetRequiredInstanceExtensions(&extCount), "Couldn't get vulkan instance extensions: ???");
-	std::vector instanceExtensions(extNames, extNames + extCount);
+	// auto extNames = Unwrap(glfwGetRequiredInstanceExtensions(&extCount), "Couldn't get vulkan instance extensions: ???");
+	// std::vector instanceExtensions(extNames, extNames + extCount);
+    std::vector instanceExtensions = {"VK_KHR_surface", "VK_KHR_wayland_surface", "VK_EXT_debug_utils"};
 	instanceExtensions.push_back(vk::EXTDebugUtilsExtensionName);
+    std::println("GLFW requested: {}", instanceExtensions);
 
 	std::println("Checking Extensions");
 	bool extensionsAvailable = std::ranges::all_of(instanceExtensions, [&](const char * required) {
@@ -225,24 +226,23 @@ void VulkanContext::init(GLFWwindow *window) {
 
     // ALLOCATOR
 
-    VmaAllocatorCreateInfo allocatorInfo = {
-        // .flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT,
-        .physicalDevice = this->physicalDevice,
-        .device = this->device,
-        .instance = this->instance,
-        .vulkanApiVersion = vk::ApiVersion14,
-    };
-    vmaCreateAllocator(&allocatorInfo, &this->allocator);
+    auto allocatorInfo = vma::AllocatorCreateInfo{}
+        .setPhysicalDevice(this->physicalDevice)
+        .setDevice(this->device)
+        .setInstance(this->instance)
+        .setVulkanApiVersion(vk::ApiVersion14)
+    ;
+    this->allocator = vma::createAllocator(allocatorInfo);
 
 }
 
-void VulkanContext::deinit() {
+VulkanContext::~VulkanContext() {
     this->waitForTransfers();
     while (not this->destruction_queue.empty()) {
         this->destruction_queue.front().second.deinit(this->allocator);
         this->destruction_queue.pop();
     }
-    vmaDestroyAllocator(this->allocator);
+    this->allocator.destroy();
     {
         std::scoped_lock poolsLock{commandPoolMtx, transferCommandPoolMtx};
         this->device.destroyCommandPool(this->commandPool);
@@ -344,4 +344,6 @@ void VulkanContext::pruneDestructionQueue() {
     }
 }
 
-void VulkanContext::queueDestroy(AllocBuffer buf) { destruction_queue.push({currentFrame, buf}); };
+void VulkanContext::queueDestroy(AllocBuffer buf) { 
+    destruction_queue.push({currentFrame, buf}); 
+};

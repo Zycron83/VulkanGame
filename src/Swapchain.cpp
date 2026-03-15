@@ -1,4 +1,5 @@
 #include "Context.h"
+#include "vk_mem_alloc_enums.hpp"
 #include "Swapchain.h"
 
 void Swapchain::init(VulkanContext &vkc, vk::Extent2D extent, vk::SwapchainKHR oldSwapchain) {
@@ -54,8 +55,10 @@ void Swapchain::init(VulkanContext &vkc, vk::Extent2D extent, vk::SwapchainKHR o
         vk::ImageTiling::eOptimal,
         vk::ImageUsageFlagBits::eDepthStencilAttachment,
     };
-    VmaAllocationCreateInfo aci{{}, VmaMemoryUsage::VMA_MEMORY_USAGE_AUTO };
-    vmaCreateImage(vkc.allocator, (VkImageCreateInfo*)&dici, &aci, (VkImage*)&this->depthBufferImage, &this->depthBufferAlloc, NULL);
+    vma::AllocationCreateInfo aci{{}, vma::MemoryUsage::eAuto };
+    auto [alloc, image] = vkc.allocator.createImage(dici, aci);
+    this->depthBufferAlloc = alloc;
+    this->depthBufferImage = image;
 
     vk::ImageViewCreateInfo divci{{}, 
         this->depthBufferImage, 
@@ -67,7 +70,7 @@ void Swapchain::init(VulkanContext &vkc, vk::Extent2D extent, vk::SwapchainKHR o
     this->depthBufferImageView = vkc.device.createImageView(divci);
 }
 void Swapchain::deinit(VulkanContext &vkc) {
-    vmaDestroyImage(vkc.allocator, depthBufferImage, depthBufferAlloc);
+    vkc.allocator.destroyImage(depthBufferImage, depthBufferAlloc);
     for (auto imageView : imageViews) {
         vkc.device.destroyImageView(imageView);
     }

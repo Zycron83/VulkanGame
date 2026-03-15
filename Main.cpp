@@ -8,7 +8,6 @@
 #include "imgui.h"
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_vulkan.h"
-#include <numeric>
 #endif
 
 #include <iostream>
@@ -26,8 +25,7 @@ extern Settings g_Settings;
 Settings::NoiseSettings prev_NoiseSettings = g_Settings.Noise;
 extern DebugFrameStats g_DebugFrameStats;
 
-#define FPS_LIMIT 60
-#define FRAMETIME_LIMIT (1000 / FPS_LIMIT)
+constexpr int FPS_LIMIT = 165;
 
 struct {
     int width;
@@ -46,14 +44,15 @@ inline static bool pressed(int key) {
 }
 void processInput() {
     auto c = g_Renderer->camera.get();
+    const float mult = speed;
     if (pressed(GLFW_KEY_W))
-        c->position += c->front * speed;
+        c->position += c->front * mult;
     if (pressed(GLFW_KEY_S))
-        c->position -= c->front * speed;
+        c->position -= c->front * mult;
     if (pressed(GLFW_KEY_D))
-        c->position += glm::cross(c->front, c->up) * speed;
+        c->position += glm::cross(c->front, c->up) * mult;
     if (pressed(GLFW_KEY_A))
-        c->position -= glm::cross(c->front, c->up) * speed;
+        c->position -= glm::cross(c->front, c->up) * mult;
     // if (pressed(GLFW_KEY_J)) c->position.x -= speed;
     // if (pressed(GLFW_KEY_I)) c->position.x += speed;
     // if (pressed(GLFW_KEY_K)) c->position.y -= speed;
@@ -167,9 +166,11 @@ int main(int argc, char* argv[])
     ImGui_ImplGlfw_InitForVulkan(window, true); 
     #endif
 
-    auto start = std::chrono::steady_clock::now();
-    std::array<double, 20> frametimes = {0};
-    int frame_i = 0;
+    // auto start = std::chrono::steady_clock::now();
+    // std::array<double, 20> frametimes = {0};
+    // int frame_i = 0;
+    AverageTimer<20, milliseconds> timer;
+    timer.start();
     
     try {
         g_Renderer = new Renderer(window);
@@ -188,15 +189,20 @@ int main(int argc, char* argv[])
         while (!glfwWindowShouldClose(window)) {
             frameCount += 1;
             // Cap framerate
-            auto now = std::chrono::steady_clock::now();
-            auto frame_time = now - start;
-            frametimes[frame_i] = frame_time.count() / 1e6;
-            frame_i = (frame_i + 1) % frametimes.size();
-            constexpr auto target_frame_time = std::chrono::milliseconds(FRAMETIME_LIMIT);
-            if (frame_time < target_frame_time) {
-                std::this_thread::sleep_for(target_frame_time - frame_time);
+            // auto now = std::chrono::steady_clock::now();
+            // auto frame_time = now - start;
+            // frametimes[frame_i] = frame_time.count() / 1e6;
+            // frame_i = (frame_i + 1) % frametimes.size();
+            // if (frame_time < std::chrono::milliseconds((int)FRAMETIME_LIMIT)) {
+            //     std::this_thread::sleep_for(std::chrono::milliseconds((int)FRAMETIME_LIMIT) - frame_time);
+            // }
+            // start = std::chrono::steady_clock::now();
+            auto time = timer.stop();
+            constexpr steady_clock::rep FRAMETIME_LIMIT = (steady_clock::rep)1000 / FPS_LIMIT;
+            if (time < FRAMETIME_LIMIT) {
+                std::this_thread::sleep_for(milliseconds(FRAMETIME_LIMIT - time));
             }
-            start = std::chrono::steady_clock::now();
+            timer.start();
 
             int w, h;
             // glfwGetFramebufferSize(window, &w, &h);
@@ -219,10 +225,10 @@ int main(int argc, char* argv[])
 
                 Begin("Info");
                 Text("%zu", frameCount);
-                Text("Frame Time: %.2f ms", std::accumulate(frametimes.begin(), frametimes.end(), 0.0) / frametimes.size());
+                Text("Frame Time: %.2f ms", timer.get() / 1000.0);
                 Text("Triangles: %zu", g_DebugFrameStats.index_count / 3);
                 Text("Chunk Memory: %.2lu MB", g_Settings.chunkBytes.load() / 1024 / 1024);
-                Text("Chunks in Queue: %zu", g_Renderer->terrain.threadPool.input.size());
+                Text("Chunks in Fill Queue: %zu", g_Renderer->terrain.chunkThread.queue.size());
                 End();
 
                 // Begin("Noise Settings");
@@ -240,8 +246,8 @@ int main(int argc, char* argv[])
             #endif
             if (g_Settings.Noise != prev_NoiseSettings) {
                 prev_NoiseSettings = g_Settings.Noise;
-                g_Renderer->terrain.deinit();
-                g_Renderer->terrain.init(&g_Renderer->vkc);
+                g_Renderer->terrain.~Terrain();
+                new(&g_Renderer->terrain) Terrain(g_Renderer->vkc);
             }
             g_DebugFrameStats.index_count = 0;
             g_Renderer->terrain.tickFrame(*g_Renderer->camera.get());
