@@ -172,7 +172,8 @@ VulkanContext::VulkanContext(GLFWwindow *window) {
         vk::PhysicalDeviceVulkan11Features{}
             .setShaderDrawParameters(true),
         vk::PhysicalDeviceVulkan12Features{}
-            .setScalarBlockLayout(true),
+            .setScalarBlockLayout(true)
+            .setBufferDeviceAddress(true),
             // .setTimelineSemaphore(true),
         vk::PhysicalDeviceVulkan13Features{}
             .setDynamicRendering(true)
@@ -227,6 +228,7 @@ VulkanContext::VulkanContext(GLFWwindow *window) {
     // ALLOCATOR
 
     auto allocatorInfo = vma::AllocatorCreateInfo{}
+        .setFlags(vma::AllocatorCreateFlagBits::eBufferDeviceAddress)
         .setPhysicalDevice(this->physicalDevice)
         .setDevice(this->device)
         .setInstance(this->instance)

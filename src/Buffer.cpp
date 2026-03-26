@@ -2,10 +2,10 @@
 #include "Context.h"
 #include "Util.hpp"
 #include "vk_mem_alloc_enums.hpp"
+#include "vulkan/vulkan.hpp"
 
 #include <mutex>
 #include <print>
-#include "cpptrace/cpptrace.hpp"
 
 void AllocBuffer::initHost(std::string name, VulkanContext &vkc, size_t size, vk::BufferUsageFlags usage) {
     this->init(name, vkc, size, usage, vma::MemoryUsage::eAutoPreferHost, 
@@ -32,7 +32,7 @@ void AllocBuffer::init(
     }
     this->name = std::move(name);
     this->size = size;
-    vk::BufferCreateInfo bufferInfo{{}, this->size, usage /* | vk::BufferUsageFlagBits::eShaderDeviceAddress */ };
+    vk::BufferCreateInfo bufferInfo{{}, static_cast<size_t>(this->size * 1.05), usage | vk::BufferUsageFlagBits::eShaderDeviceAddress};
 
     vma::AllocationCreateInfo allocInfo{};
     allocInfo.usage = memUsage;
@@ -45,6 +45,8 @@ void AllocBuffer::init(
         &this->alloc,
         &this->info
     );
+    this->address = vkc.device.getBufferAddress(vk::BufferDeviceAddressInfo{this->buffer});
+
     if (result != vk::Result::eSuccess) {
         std::println("vma::createBuffer FAILED for {}", name);
     }

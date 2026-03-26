@@ -11,7 +11,7 @@ struct AllocBuffer {
     vk::Buffer buffer;
     vma::Allocation alloc;
     vma::AllocationInfo info;
-    size_t size;
+    size_t size, capacity;
     vk::DeviceAddress address;
     std::string name;
 
@@ -28,8 +28,9 @@ struct AllocBuffer {
 
     void deinit(vma::Allocator allocator) {
         allocator.destroyBuffer(buffer, alloc);
-        std::println("Deinit Buffer {}", name);
+        // std::println("Deinit Buffer {}", name);
         buffer = nullptr;
+        address = 0;
         size = 0;
     }
 };

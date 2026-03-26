@@ -62,9 +62,9 @@ target_link_libraries(VulkanGame PRIVATE glfw)
 # target_link_libraries(VulkanGame PRIVATE Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator)
 add_subdirectory("vendor/VulkanMemoryAllocator-Hpp")
 target_link_libraries(VulkanGame PRIVATE Vulkan::Vulkan VulkanMemoryAllocator-Hpp::VulkanMemoryAllocator-Hpp)
-target_include_directories(VulkanGame PRIVATE vendor/cpptrace/include)
-target_link_directories(VulkanGame PRIVATE vendor/cpptrace/lib)
-target_link_libraries(VulkanGame PRIVATE cpptrace dwarf)
+# target_include_directories(VulkanGame PRIVATE vendor/cpptrace/include)
+# target_link_directories(VulkanGame PRIVATE vendor/cpptrace/lib)
+# target_link_libraries(VulkanGame PRIVATE cpptrace dwarf)
 
 # include(FetchContent)
 # FetchContent_Declare(

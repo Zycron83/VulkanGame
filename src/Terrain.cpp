@@ -1,11 +1,10 @@
 #include <algorithm>
 #include <format>
 #include <memory>
+#include <optional>
 #include <print>
 #include <mutex>
 #include <thread>
-#include <vector>
-#include <glm/gtx/io.hpp>
 #include <version>
 #include <array>
 
@@ -18,7 +17,7 @@
 #include "Renderer.h"
 #include "Util.hpp"
 
-#define LOG if (1)
+#define LOG if (0)
 
 extern DebugFrameStats g_DebugFrameStats;
 extern Settings g_Settings;
@@ -198,7 +197,7 @@ thread_local Index *indexData;
 // Must own.
 void Chunk::writeMesh(VulkanContext &vkc) {
 
-    meshed = false;
+    // meshed = false;
     LOG std::println("Meshing {}", *this);
 
     size_t vertexOffset = 0; // in vertices
@@ -232,7 +231,11 @@ void Chunk::writeMesh(VulkanContext &vkc) {
         for (int z = 0; z < CHUNK_LENGTH; z += 1) {
             // up <<|>> down
             uint64_t bits = opaquenessMask_Y[x][z];
-            if (bits == 0) continue;
+            if (bits == 0) {
+                negMask >>= 1;
+                posMask >>= 1;
+                continue;
+            }
             bool curr = false;
             bool prev = negMask & 1;
             // bits >>= 1;
@@ -263,7 +266,11 @@ void Chunk::writeMesh(VulkanContext &vkc) {
         negMask = neighbourChunks[Z_NEG] ? neighbourChunks[Z_NEG]->opaquenessMask_Y[x][CHUNK_LENGTH - 1] : 0;
         for (int y = 0; y < CHUNK_LENGTH; y += 1) {
             uint64_t bits = opaquenessMask_Z[y][x];
-            if (bits == 0) continue;
+            if (bits == 0) {
+                negMask >>= 1;
+                posMask >>= 1;
+                continue;
+            }
             bool curr = false;
             bool prev = negMask & 1;
             // bits >>= 1;
@@ -294,7 +301,11 @@ void Chunk::writeMesh(VulkanContext &vkc) {
         negMask = neighbourChunks[X_NEG] ? neighbourChunks[X_NEG]->opaquenessMask_Y[CHUNK_LENGTH - 1][z] : 0;
         for (int y = 0; y < CHUNK_LENGTH; y += 1) {
             uint64_t bits = opaquenessMask_X[z][y];
-            if (bits == 0) continue;
+            if (bits == 0) {
+                negMask >>= 1;
+                posMask >>= 1;
+                continue;
+            }
             bool curr = false;
             bool prev = negMask & 1;
             // bits >>= 1;
@@ -372,7 +383,7 @@ void chunkThreadFunction(VulkanContext &vkc, ChunkThread &ct) {
         }
 
         if (ct.queue.empty()) {
-            std::println("Chunk queue is somehow empty");
+            LOG std::println("Chunk queue is somehow empty");
             continue;
         }
         auto [action, chunkCoord] = ct.queue.front();
@@ -380,7 +391,7 @@ void chunkThreadFunction(VulkanContext &vkc, ChunkThread &ct) {
         {
             // std::unique_lock chunksLock{ct.chunksMtx};
             if (!ct.chunks.contains(chunkCoord)) {
-                std::println("Skipping deleted chunk");
+                LOG std::println("Skipping deleted chunk");
                 continue;
             }
             
@@ -389,7 +400,6 @@ void chunkThreadFunction(VulkanContext &vkc, ChunkThread &ct) {
             switch (action) {
                 case Action::FILL:
                     chunk->fillChunk();
-                    ct.queue.push_back(std::make_pair(Action::MESH, chunkCoord));
 
                     for (Dir dir : dirs) {
                         ChunkCoord neighbourCoord = chunkCoord + unitDir[dir];
@@ -399,17 +409,18 @@ void chunkThreadFunction(VulkanContext &vkc, ChunkThread &ct) {
                             chunk->neighbourChunks[dir] = neighbour.get();
                             neighbour->neighbourChunks[opposite[dir]] = chunk.get();
                             if (std::ranges::find_if(ct.queue, [&neighbourCoord](auto &pair) { return neighbourCoord == pair.second; }) == ct.queue.end()) {
-                                ct.queue.push_back(std::make_pair(Action::MESH, neighbourCoord));
+                                ct.mesh(neighbourCoord);
                             }
                         };
                     }
+                    ct.mesh(chunkCoord);
                     // std::println("FILL");
                     // ct.spread(chunkCoord);
                     break;
                 case Action::MESH:
                     chunk->writeMesh(vkc);
                     // std::println("MESH");
-                    break;
+                    break; 
             }
         }
         
@@ -447,7 +458,7 @@ void ChunkThread::loadAround(VulkanContext &vkc, const ChunkCoord center) {
                         
                         chunks.insert(std::make_pair(coord, std::make_unique<Chunk>(coord)));
                     }
-                    queue.push_back(std::make_pair(Action::FILL, coord));
+                    fill(coord);
                 }
             }
         }}};
@@ -480,7 +491,29 @@ void ChunkThread::loadAround(VulkanContext &vkc, const ChunkCoord center) {
     deleted.clear();
 }
 
-void Terrain::tickFrame(const Camera &camera) {
+// MUST LOCK chunks
+std::optional<Block> Terrain::getBlock(GlobalCoord gCoord) const noexcept {
+    if (!chunkThread.chunks.contains(gCoord.chunk)) return std::nullopt;
+    return chunkThread.chunks.at(gCoord.chunk)->getBlock(gCoord.inner);
+}
+
+bool Terrain::placeBlock(const Camera &camera) noexcept {
+    return false;
+}
+bool Terrain::breakBlock(const Camera &camera) noexcept {
+    const auto ray = [&camera](float t) {
+        return camera.position + t * camera.front;
+    };
+
+    glm::ivec3 step = glm::sign(camera.front);
+    
+
+    float t;
+
+    return false;
+}
+
+void Terrain::tickFrame(const Camera &camera) noexcept {
     const ChunkCoord currentCenterChunkCoord = camera.position / static_cast<float>(CHUNK_LENGTH);
     if (currentCenterChunkCoord != chunkThread.centerChunkCoord) {
         chunkThread.centerChunkCoord = currentCenterChunkCoord;

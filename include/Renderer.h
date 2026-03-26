@@ -36,9 +36,6 @@ struct Renderer {
 	vk::SurfaceKHR surface;
 	Swapchain swapchain;
 	vk::Pipeline graphicsPipeline;
-	vk::DescriptorPool descriptorPool;
-	std::vector<vk::DescriptorSet> descriptorSets;
-	vk::DescriptorSetLayout descriptorSetLayout;
 	vk::PipelineLayout pipelineLayout;
 	
 	std::vector<vk::Semaphore> renderFinishedSemaphores;
@@ -48,8 +45,6 @@ struct Renderer {
 	void initCommandBuffers();
 	void recordCommandBuffer(vk::CommandBuffer, uint32_t imageIndex, uint32_t currentFrame);
 	void initSyncObjects();
-	void initDescriptorLayout();
-	void initDescriptorSets();
 	void initUniformBuffers();
 	void updateUniformBuffers(AllocBuffer);
 };

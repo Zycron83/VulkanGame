@@ -96,8 +96,6 @@ Renderer::Renderer(GLFWwindow *window) : window(window), vkc(window), terrain(vk
 	initSyncObjects();
 	// initVertexIndexBuffers();
 	initUniformBuffers();
-	initDescriptorLayout();
-	initDescriptorSets();
 	initGraphicsPipeline();
 }
 
@@ -115,8 +113,6 @@ Renderer::~Renderer() {
 
 	swapchain.deinit(vkc);
 	dev.destroySwapchainKHR(swapchain);
-	dev.destroyDescriptorSetLayout(descriptorSetLayout);
-	dev.destroyDescriptorPool(descriptorPool);
 	dev.destroyPipelineLayout(pipelineLayout);
 	for (auto &frame : vkc.frames) {
 		dev.destroySemaphore(frame.imageAvailableSemaphore);
@@ -234,34 +230,6 @@ vk::ShaderEXT Renderer::createShader(
 	return shader;
 }
 
-void Renderer::initDescriptorLayout() {
-	vk::DescriptorSetLayoutBinding layoutBinding{
-		0, 
-		vk::DescriptorType::eUniformBuffer, 
-		1, 
-		vk::ShaderStageFlagBits::eVertex
-	};
-	vk::DescriptorSetLayoutCreateInfo layoutInfo{{}, 
-		layoutBinding
-	};
-	descriptorSetLayout = vkc.device.createDescriptorSetLayout(layoutInfo);
-}
-
-void Renderer::initDescriptorSets() {
-	vk::DescriptorPoolSize poolSize{vk::DescriptorType::eUniformBuffer, VulkanContext::FRAME_COUNT};
-	vk::DescriptorPoolCreateInfo poolInfo{{}, VulkanContext::FRAME_COUNT, poolSize};
-	descriptorPool = vkc.device.createDescriptorPool(poolInfo);
-	std::vector<vk::DescriptorSetLayout> layouts(vkc.FRAME_COUNT, descriptorSetLayout);
-	vk::DescriptorSetAllocateInfo allocInfo{descriptorPool, layouts};
-	descriptorSets = vkc.device.allocateDescriptorSets(allocInfo);
-	
-	for (int i = 0; i < vkc.FRAME_COUNT; i += 1) {
-		vk::DescriptorBufferInfo dbi{vkc.frames[i].uniformBuffer.buffer, 0, sizeof(UniformBufferObject)};
-		vk::WriteDescriptorSet writeSet{descriptorSets[i], 0, 0, 1, vk::DescriptorType::eUniformBuffer, {}, &dbi};
-		vkc.device.updateDescriptorSets(writeSet, {});
-	}
-}
-
 // vk::ShaderEXT vertexShader, fragmentShader;
 // class Shader {
 // 	std::vector<std::tuple<vk::ShaderEXT, vk::ShaderStageFlagBits>> objects;
@@ -327,7 +295,11 @@ void Renderer::initGraphicsPipeline() {
 	vk::PipelineColorBlendStateCreateInfo colorBlendInfo{};
 	colorBlendInfo.setAttachments(attachment);
 
-	vk::PipelineLayoutCreateInfo layoutInfo{{}, descriptorSetLayout};
+	vk::PushConstantRange pushConstantRange{
+		vk::ShaderStageFlagBits::eVertex, 
+		0, sizeof(vk::DeviceAddress)
+	};
+	vk::PipelineLayoutCreateInfo layoutInfo{{}, {}, pushConstantRange};
 	this->pipelineLayout = vkc.device.createPipelineLayout(layoutInfo);
 
 	vk::PipelineRenderingCreateInfo renderPipelineInfo{};
@@ -439,7 +411,12 @@ void Renderer::recordCommandBuffer(vk::CommandBuffer commandBuffer, uint32_t ima
 
 	commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, this->graphicsPipeline);
 
-	commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout, 0, descriptorSets[frameIndex], nullptr);
+	vk::PushConstantsInfo pushConstantsInfo{pipelineLayout, 
+		vk::ShaderStageFlagBits::eVertex, 
+		0, sizeof(vk::DeviceAddress), 
+		&vkc.frames[frameIndex].uniformBuffer.address
+	};
+	commandBuffer.pushConstants2(pushConstantsInfo);
 
 	commandBuffer.setViewport(0,
 		vk::Viewport{

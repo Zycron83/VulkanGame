@@ -1,4 +1,3 @@
-// Vertex shader parameters
 struct VertexInput
 {
     float3 position : POSITION;
@@ -13,7 +12,6 @@ struct VertexOutput
     float3 normal : NORMAL;
 };
 
-// Uniform buffer
 struct UniformBuffer
 {
     float time;
@@ -21,7 +19,6 @@ struct UniformBuffer
     float3x3 normalMatrix;
     float2 point;
 };
-[[vk_binding(0, 0)]] ConstantBuffer<UniformBuffer, ScalarDataLayout> ubo;
 
 enum Dir {
     X_POS, X_NEG,
@@ -31,7 +28,7 @@ enum Dir {
 
 // Vertex shader
 [shader("vertex")]
-VertexOutput vertexMain(VertexInput input, uint index : SV_VertexID)
+VertexOutput vertexMain(VertexInput input, uint index: SV_VertexID, uniform UniformBuffer *ubo)
 {
     VertexOutput output;
     output.position = mul(ubo.mvp, float4(input.position, 1.0));
