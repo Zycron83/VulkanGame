@@ -117,7 +117,7 @@ Renderer::~Renderer() {
 	for (auto &frame : vkc.frames) {
 		dev.destroySemaphore(frame.imageAvailableSemaphore);
 		dev.destroyFence(frame.inFlightFence);
-		frame.uniformBuffer.deinit(vkc.allocator);
+		frame.uniformBuffer.deinit(vkc);
 	}
 	for (auto &semaphore : renderFinishedSemaphores) {
 		dev.destroySemaphore(semaphore);
@@ -145,6 +145,7 @@ void Renderer::initUniformBuffers() {
 	int i = 0;
 	for (auto &frame : vkc.frames) {
 		frame.uniformBuffer.init(std::format("Uniform Buffer for Frame {}", i), vkc, 
+			sizeof(ubo),
 			sizeof(ubo),
 			vk::BufferUsageFlagBits::eUniformBuffer,
 			vma::MemoryUsage::eAuto,

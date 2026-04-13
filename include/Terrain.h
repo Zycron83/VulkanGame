@@ -1,8 +1,8 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <condition_variable>
-#include <limits>
 #include <mutex>
 #include <memory>
 #include <deque>
@@ -13,6 +13,7 @@
 #include <glm/vec3.hpp>
 #include <glm/gtx/hash.hpp>
 
+#include "Concurrent.hpp"
 #include "Buffer.h"
 #include "Camera.hpp"
 #include "Context.h"
@@ -20,13 +21,30 @@
 constexpr int CHUNK_LENGTH = 32;
 constexpr int CHUNK_BOTTOM = 0;
 constexpr int CHUNK_TOP = 2;
+using MaskLine = uint32_t;
+template<>
+struct std::formatter<glm::ivec3> {
+    constexpr auto parse(std::format_parse_context &ctx) {
+		return ctx.begin();
+	}
+    auto format(const glm::ivec3 &coord, std::format_context& ctx) const {
+        return std::format_to(std::move(ctx.out()), "[{}, {}, {}]", coord.x, coord.y, coord.z);
+    }
+};
 using ChunkCoord = glm::ivec3;
 using InnerCoord = glm::ivec3;
 struct GlobalCoord {
     inline operator glm::ivec3() {
         return this->chunk * CHUNK_LENGTH + this->inner;
     }
-    void operator+=(const glm::ivec3&rhs) {
+    GlobalCoord() {}
+    GlobalCoord(glm::ivec3 v) : chunk(v / CHUNK_LENGTH), inner(v % CHUNK_LENGTH) {
+        if (inner.x < 0) inner.x += CHUNK_LENGTH;
+        if (inner.y < 0) inner.y += CHUNK_LENGTH;
+        if (inner.z < 0) inner.z += CHUNK_LENGTH;
+    }
+
+    void operator+=(const glm::ivec3 &rhs) {
         inner += rhs;
         if (inner.x >= CHUNK_LENGTH) {
             inner.x -= CHUNK_LENGTH;
@@ -77,16 +95,16 @@ namespace std {
 
 struct Chunk {
     std::unique_ptr<std::array<Block, CHUNK_LENGTH * CHUNK_LENGTH * CHUNK_LENGTH>> data; // doubles as validity check
-    std::array2<uint32_t, CHUNK_LENGTH> opaquenessMask_Y{0}; // X, Z
-    std::array2<uint32_t, CHUNK_LENGTH> opaquenessMask_Z{0}; // Y, X
-    std::array2<uint32_t, CHUNK_LENGTH> opaquenessMask_X{0}; // Z, Y
-    std::array2<uint32_t, 6, CHUNK_LENGTH> borderMasks{0};
+    std::array2<MaskLine, CHUNK_LENGTH> opaquenessMask_Y{0}; // X, Z
+    std::array2<MaskLine, CHUNK_LENGTH> opaquenessMask_Z{0}; // Y, X
+    std::array2<MaskLine, CHUNK_LENGTH> opaquenessMask_X{0}; // Z, Y
+    // std::array2<MaskLine, 6, CHUNK_LENGTH> borderMasks{0};
     // std::optional<std::array<uint32_t, CHUNK_LENGTH>> borderMask_X_POS; 
     // std::optional<std::array<uint32_t, CHUNK_LENGTH>> borderMask_X_NEG; 
     // std::optional<std::array<uint32_t, CHUNK_LENGTH>> borderMask_Y_POS; 
     // std::optional<std::array<uint32_t, CHUNK_LENGTH>> borderMask_Y_NEG; 
     // std::optional<std::array<uint32_t, CHUNK_LENGTH>> borderMask_Z_POS; 
-    // std::optional<std::array<uint32_t, CHUNK_LENGTH>> borderMask_Z_BEG; 
+    // std::optional<std::array<uint32_t, CHUNK_LENGTH>> borderMask_Z_NEG; 
     std::array<Chunk *, 6> neighbourChunks{0};
     AllocBuffer vertexBuffer;
     AllocBuffer indexBuffer;
@@ -131,47 +149,28 @@ struct std::formatter<Chunk> {
         return std::format_to(std::move(ctx.out()), "[{}, {}, {}]", chunk.chunkCoord.x, chunk.chunkCoord.y, chunk.chunkCoord.z);
     }
 };
-template<>
-struct std::formatter<ChunkCoord> {
-    constexpr auto parse(std::format_parse_context &ctx) {
-		return ctx.begin();
-	}
-    auto format(const ChunkCoord &coord, std::format_context& ctx) const {
-        return std::format_to(std::move(ctx.out()), "[{}, {}, {}]", coord.x, coord.y, coord.z);
-    }
-};
-
-/*
-    UNINIT, data == nullopt
-    EMPTY, data.value == null
-    FILLED, data != null
-    MESHED, vertexCount >= 0
-*/
 
 struct ChunkThread {
-    enum class Action : bool { FILL, MESH };
-    using QueueItem = std::pair<Action, ChunkCoord>;
+    enum class QueueAction : bool { FILL, MESH };
+    using QueueItem = std::pair<QueueAction, ChunkCoord>;
     using ResultItem = QueueItem;
 
-    std::mutex queueMtx;
-    std::condition_variable queueCond;
+    std::mutex threadMtx;
+    std::condition_variable threadCond;
     std::deque<QueueItem> queue;
 
-    void fill(ChunkCoord coord) {
-        // std::println("push FILL {}", coord);
-        queue.push_back(std::make_pair(Action::FILL, coord));
-    };
     void mesh(ChunkCoord coord) {
         // std::println("push MESH {}", coord);
-        queue.push_back(std::make_pair(Action::MESH, coord));
+        queue.push_back(std::make_pair(QueueAction::MESH, coord));
     };
 
     std::mutex chunksMtx;
     std::unordered_map<ChunkCoord, std::unique_ptr<Chunk>> chunks;
 
-    // mutex maybe? ...
-    ChunkCoord centerChunkCoord = ChunkCoord{std::numeric_limits<int>::max()};
-    std::atomic<bool> updateCenter;
+    ValueChannel<ChunkCoord> centerChunkCoord;
+
+    using Edit = std::pair<GlobalCoord, Block>;
+    QueueChannel<Edit> editsPending;
     
     std::atomic<bool> stopThread = false;
     std::thread thread;
@@ -182,15 +181,14 @@ struct ChunkThread {
 struct Terrain {
     VulkanContext &vkc;
     
-    ChunkThread chunkThread;
+    ChunkThread ct;
 
     Terrain(VulkanContext &);
     ~Terrain();
 
     void tickFrame(const Camera &camera) noexcept;
     std::optional<Block> getBlock(GlobalCoord) const noexcept;
-    bool placeBlock(const Camera &camera) noexcept;
-    bool breakBlock(const Camera &camera) noexcept;
+    void setBlock(GlobalCoord, Block) noexcept;
     void draw(vk::CommandBuffer);
 
 };

@@ -40,8 +40,9 @@ VertexOutput vertexMain(VertexInput input, uint index: SV_VertexID, uniform Unif
     return output;
 }
 
-bool eq(float x, float y) {
-    return abs(x - y) < 0.01;
+inline bool eq(float x, float y) {
+    // return abs(x - y) < 0.01;
+    return x == y;
 }
 
 // Fragment shader

@@ -54,6 +54,7 @@ target_include_directories(VulkanGame PRIVATE
     "vendor/GLM/include"
     "vendor/imgui"
     "vendor/simplex-noise/include"
+    "vendor/readerwriterqueue/include"
 )
 
 target_link_libraries(VulkanGame PRIVATE glfw)

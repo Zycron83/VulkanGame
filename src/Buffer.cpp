@@ -8,31 +8,30 @@
 #include <print>
 
 void AllocBuffer::initHost(std::string name, VulkanContext &vkc, size_t size, vk::BufferUsageFlags usage) {
-    this->init(name, vkc, size, usage, vma::MemoryUsage::eAutoPreferHost, 
+    this->init(name, vkc, size, size, usage, vma::MemoryUsage::eAutoPreferHost, 
         vma::AllocationCreateFlagBits::eHostAccessSequentialWrite | vma::AllocationCreateFlagBits::eMapped
     );
 }
 
 void AllocBuffer::initDevice(std::string name, VulkanContext &vkc, size_t size, vk::BufferUsageFlags usage) {
-    this->init(name, vkc, size, usage, vma::MemoryUsage::eAutoPreferDevice);
+    this->init(name, vkc, size, size * 1.1, usage, vma::MemoryUsage::eAutoPreferDevice);
 }
 
 void AllocBuffer::init(
     std::string name,
     VulkanContext &vkc, 
     size_t size, 
+    size_t capacity,
     vk::BufferUsageFlags usage, 
     vma::MemoryUsage memUsage,
     vma::AllocationCreateFlags allocFlags
 ) {
-    if (buffer != NULL) {
-        // cpptrace::generate_trace().print();
-        // assert(false);
-        this->deinit(vkc.allocator);
-    }
+    Unwrap(buffer == nullptr, std::format("Tried to init already existing buffer. Old: {} -> New: {}", this->name, name).c_str());
+
     this->name = std::move(name);
     this->size = size;
-    vk::BufferCreateInfo bufferInfo{{}, static_cast<size_t>(this->size * 1.05), usage | vk::BufferUsageFlagBits::eShaderDeviceAddress};
+    this->capacity = capacity;
+    vk::BufferCreateInfo bufferInfo{{}, capacity, usage | vk::BufferUsageFlagBits::eShaderDeviceAddress};
 
     vma::AllocationCreateInfo allocInfo{};
     allocInfo.usage = memUsage;
@@ -58,4 +57,12 @@ void AllocBuffer::init(
     Unwrap(vkc.device.setDebugUtilsObjectNameEXT(&nameInfo, vkc.dldid), "Buffer debug naming failed");
     // std::println("Init Buffer {}", this->name); // -R
 
+}
+
+void AllocBuffer::deinit(VulkanContext &vkc) {
+    vkc.queueDestroy(std::move(*this));
+    // std::println("Deinit Buffer {}", name);
+    buffer = nullptr;
+    address = 0;
+    size = 0;
 }

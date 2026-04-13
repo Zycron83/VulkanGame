@@ -1,3 +1,4 @@
+#include "Terrain.h"
 #include "vulkan/vulkan.hpp"
 #include <GLFW/glfw3.h>
 
@@ -25,7 +26,8 @@ extern Settings g_Settings;
 Settings::NoiseSettings prev_NoiseSettings = g_Settings.Noise;
 extern DebugFrameStats g_DebugFrameStats;
 
-constexpr int FPS_LIMIT = 165;
+constexpr int FPS_LIMIT = 165; // frame/s
+constexpr steady_clock::rep FRAMETIME_LIMIT = (steady_clock::rep)1000 / FPS_LIMIT; // ms/frame
 
 struct {
     int width;
@@ -36,7 +38,7 @@ static GLFWwindow* window = NULL;
 Renderer* g_Renderer = NULL;
 
 static bool first_mouse_move = true;
-static float speed = 1.f;
+static float speed = 1.f; // 1.0 block/s * [s/frame]= block/frame
 static double sensitivity = .1f;
 
 inline static bool pressed(int key) {
@@ -44,7 +46,7 @@ inline static bool pressed(int key) {
 }
 void processInput() {
     auto c = g_Renderer->camera.get();
-    const float mult = speed;
+    const float mult = speed / FPS_LIMIT;
     if (pressed(GLFW_KEY_W))
         c->position += c->front * mult;
     if (pressed(GLFW_KEY_S))
@@ -63,8 +65,9 @@ void processInput() {
 
 void MouseScrollEvent(GLFWwindow* window, double xoffset, double yoffset) {
     // Speed adjustment
-    speed += yoffset * 0.1f;
-    if (speed < 0.1f) speed = 0.1f;
+    speed += yoffset * (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS ? 10.f : 1.f);
+    if (speed < 1.f) speed = 1.f;
+    ;
     
 }
 
@@ -82,12 +85,9 @@ void KeyEvent(GLFWwindow* window, int key, int scancode, int action, int mods) {
                     first_mouse_move = true;
                 }
                 break;
-            case GLFW_KEY_J: g_Settings.x -= 1; break;
-            case GLFW_KEY_I: g_Settings.x += 1; break;
-            case GLFW_KEY_K: g_Settings.y -= 1; break;
-            case GLFW_KEY_O: g_Settings.y += 1; break;
-            case GLFW_KEY_L: g_Settings.z -= 1; break;
-            case GLFW_KEY_P: g_Settings.z += 1; break;
+            case GLFW_KEY_SEMICOLON:
+                if (g_Renderer) g_Renderer->terrain.setBlock(GlobalCoord(g_Renderer->camera->position), Block::Stone);
+            case GLFW_KEY_APOSTROPHE:
         }
     }
 }
@@ -110,9 +110,8 @@ void MousePosEvent(GLFWwindow* window, double xpos, double ypos) {
     
 }
 void MouseButtonEvent(GLFWwindow* window, int button, int action, int mods) {
-    return; // TODO: Remove
-    if (action == GLFW_PRESS) {
-        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+    if (action == GLFW_PRESS && button == GLFW_MOUSE_BUTTON_RIGHT) {
+        g_Renderer->terrain.setBlock(GlobalCoord{g_Renderer->camera->position}, Block::Stone);
     }
 }
 void ErrorEvent(int code, const char* what)
@@ -169,7 +168,7 @@ int main(int argc, char* argv[])
     // auto start = std::chrono::steady_clock::now();
     // std::array<double, 20> frametimes = {0};
     // int frame_i = 0;
-    AverageTimer<20, milliseconds> timer;
+    AverageTimer<20, microseconds> timer;
     timer.start();
     
     try {
@@ -220,6 +219,7 @@ int main(int argc, char* argv[])
                 SliderFloat("FOV", &c->fov, 0, 360);
                 InputFloat2("xy Angles", &c->x_angle);
                 InputFloat3("Position", (float*)&c->position);
+                Text("Speed: %f", speed);
                 // InputFloat3("S_POS", (float*)&s_pos);
                 End();
 
@@ -228,7 +228,7 @@ int main(int argc, char* argv[])
                 Text("Frame Time: %.2f ms", timer.get() / 1000.0);
                 Text("Triangles: %zu", g_DebugFrameStats.index_count / 3);
                 Text("Chunk Memory: %.2lu MB", g_Settings.chunkBytes.load() / 1024 / 1024);
-                Text("Chunks in Fill Queue: %zu", g_Renderer->terrain.chunkThread.queue.size());
+                Text("Chunks in Fill Queue: %zu", g_Renderer->terrain.ct.queue.size());
                 End();
 
                 // Begin("Noise Settings");

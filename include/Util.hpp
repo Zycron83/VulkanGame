@@ -36,6 +36,16 @@ inline void Unwrap(vk::Result res, const char *msg) {
 	if (res == vk::Result::eSuccess) return;
 	else throw std::runtime_error(msg);
 }
+inline void Unwrap(bool res, const char *msg) {
+	if (res) return;
+	else throw std::runtime_error(msg);
+}
+
+#ifndef NDEBUG
+#define assert_msg(pred, msg) if (!(pred)) throw std::runtime_error(std::format("Assert(" #pred ") Failed: {}", msg))
+#else
+#define assert_msg(pred, msg) ;
+#endif
 
 class Timer {
 	std::optional<steady_clock::time_point> m_Start;

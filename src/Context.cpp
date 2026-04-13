@@ -50,12 +50,13 @@ VulkanContext::VulkanContext(GLFWwindow *window) {
 	}
 
 	std::println("Getting required extensions from GLFW");
+    assert(glfwVulkanSupported());
 	uint32_t extCount;
-	// auto extNames = Unwrap(glfwGetRequiredInstanceExtensions(&extCount), "Couldn't get vulkan instance extensions: ???");
-	// std::vector instanceExtensions(extNames, extNames + extCount);
-    std::vector instanceExtensions = {"VK_KHR_surface", "VK_KHR_wayland_surface", "VK_EXT_debug_utils"};
+	auto extNames = Unwrap(glfwGetRequiredInstanceExtensions(&extCount), "Couldn't get vulkan instance extensions: ???");
+	std::vector instanceExtensions(extNames, extNames + extCount);
+    // std::vector instanceExtensions = {"VK_KHR_surface", "VK_KHR_wayland_surface", "VK_EXT_debug_utils"};
 	instanceExtensions.push_back(vk::EXTDebugUtilsExtensionName);
-    std::println("GLFW requested: {}", instanceExtensions);
+    std::println("Requesting Extensions: {}", instanceExtensions);
 
 	std::println("Checking Extensions");
 	bool extensionsAvailable = std::ranges::all_of(instanceExtensions, [&](const char * required) {
@@ -241,7 +242,8 @@ VulkanContext::VulkanContext(GLFWwindow *window) {
 VulkanContext::~VulkanContext() {
     this->waitForTransfers();
     while (not this->destruction_queue.empty()) {
-        this->destruction_queue.front().second.deinit(this->allocator);
+        auto &buf = this->destruction_queue.front().second;
+        allocator.destroyBuffer(buf.buffer, buf.alloc);
         this->destruction_queue.pop();
     }
     this->allocator.destroy();
@@ -329,7 +331,8 @@ void VulkanContext::waitForTransfers() {
     while (!transfers.empty() && this->device.getFenceStatus(transfers.front().fence) == vk::Result::eSuccess) {
         auto transfer = transfers.front();
         this->device.freeCommandBuffers(this->transferCommandPool, transfer.cmdBuf);
-        if (transfer.stagingBuffer.buffer) transfer.stagingBuffer.deinit(this->allocator);
+        auto &stageBuf = transfer.stagingBuffer;
+        if (stageBuf.buffer) allocator.destroyBuffer(stageBuf.buffer, stageBuf.alloc);
         this->device.destroyFence(transfer.fence);
         transfers.pop();
     }
@@ -341,7 +344,7 @@ void VulkanContext::pruneDestructionQueue() {
     while (not destruction_queue.empty()) {
         auto &[frame, buf] = destruction_queue.front();
         if (currentFrame - frame <= FRAME_COUNT) return;
-        buf.deinit(allocator);
+        allocator.destroyBuffer(buf.buffer, buf.alloc);
         destruction_queue.pop();
     }
 }
