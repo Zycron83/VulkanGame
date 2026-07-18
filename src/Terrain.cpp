@@ -1,5 +1,9 @@
 #include <algorithm>
 #include <format>
+#include <glm/ext/vector_bool3.hpp>
+#include <glm/gtc/constants.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <glm/vector_relational.hpp>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -7,8 +11,8 @@
 #include <mutex>
 #include <thread>
 #include <array>
+#include <utility>
 
-#include "Context.h"
 #include "SimplexNoise.h"
 
 #include "Vertex.h"
@@ -73,7 +77,7 @@ Chunk::Chunk(ChunkCoord coord) : chunkCoord(std::move(coord)), data(std::make_un
 }
 Chunk::~Chunk() {
     if (!(data == nullptr && vertexCount == 0)) {
-        std::println("{} was not deinitted before destruction", *this);
+        std::println("{} was not deinitted before destruction", *this); 
     };
 }
 
@@ -95,7 +99,7 @@ Block Chunk::getBlock(int x, int y, int z) const {
 }
 Block Chunk::getBlock(glm::ivec3 coord) const {
     if (glm::any(glm::greaterThanEqual(coord, {CHUNK_LENGTH, CHUNK_LENGTH, CHUNK_LENGTH}))
-     || glm::any(glm::lessThan(coord, {0,0,0}))
+     || glm::any(glm::lessThan(coord, glm::zero<glm::ivec3>()))
     ) {
         return Block::Invalid;
     }
@@ -187,9 +191,9 @@ constexpr glm::ivec3 unitDir[6] = {
     {0,1,0}, {0,-1,0},
     {0,0,1}, {0,0,-1},
 };
-const Dir opposite[6] = { X_NEG, X_POS, Y_NEG, Y_POS, Z_NEG, Z_POS };
-const Dir dirs[6] = { X_POS, X_NEG, Y_POS, Y_NEG, Z_POS, Z_NEG };
-const char *dirName[6] = { "X_POS", "X_NEG", "Y_POS", "Y_NEG", "Z_POS", "Z_NEG" };
+constexpr Dir opposite[6] = { X_NEG, X_POS, Y_NEG, Y_POS, Z_NEG, Z_POS };
+constexpr Dir dirs[6] = { X_POS, X_NEG, Y_POS, Y_NEG, Z_POS, Z_NEG };
+constexpr const char *dirName[6] = { "X_POS", "X_NEG", "Y_POS", "Y_NEG", "Z_POS", "Z_NEG" };
 
 std::optional<Dir> edge(InnerCoord coord) {
     if (coord.x == 0) return X_NEG;
@@ -203,6 +207,55 @@ std::optional<Dir> edge(InnerCoord coord) {
 
 thread_local Vertex *vertexData;
 thread_local Index *indexData;
+
+constexpr float maxReachDistance = 50.0f;
+std::optional<std::pair<GlobalCoord, std::optional<Dir>>> Terrain::voxelRaycast(const Camera &camera) {
+    const auto &O = camera.position;
+    const auto &D = camera.front;
+    glm::ivec3 curr{glm::floor(O)};
+
+    if (auto opt = this->getBlock(curr); opt != Block::Air) {
+        return std::make_optional(std::make_pair(curr, std::nullopt));
+    }
+
+    glm::ivec3 step{glm::sign(D)};
+
+    glm::vec3 tDelta{glm::abs(1.0f / D)};
+
+    glm::vec3 tMax{glm::mix(glm::floor(O) + 1.0f - O, O - glm::floor(O), glm::greaterThan(step, glm::ivec3{0}))};
+    tMax /= D;
+    
+    float distance = 0;
+
+    Dir norm{};
+    
+    while (true) {
+        if (tMax.x < tMax.y && tMax.x < tMax.z) {
+            norm = step.x == 1 ? X_NEG : X_POS;
+            curr.x += step.x;
+            distance = tMax.x;
+            tMax.x += tDelta.x;
+        } else if (tMax.y < tMax.z) {
+            norm = step.y == 1 ? Y_NEG : Y_POS;
+            curr.y += step.y;
+            distance = tMax.y;
+            tMax.y += tDelta.y;
+        } else {
+            norm = step.z == 1 ? Z_NEG : Z_POS;
+            curr.z += step.z;
+            distance = tMax.z;
+            tMax.z += tDelta.z;
+        }
+
+        if (distance > maxReachDistance) return std::nullopt;
+
+        if (auto opt = this->getBlock(curr); opt != Block::Air) {
+            std::println("{}, {}, {}", curr, GlobalCoord{curr}, dirName[norm]);
+            return std::make_optional(std::make_pair(curr, norm));
+        }
+    }
+
+}
 
 // Must own.
 void Chunk::writeMesh(VulkanContext &vkc) {
@@ -460,7 +513,6 @@ void chunkThreadFunction(VulkanContext &vkc, ChunkThread &ct) {
                     }
                     ct.queue.push_back(std::make_pair(MESH, chunkCoord));
                     // std::println("FILL");
-                    // ct.spread(chunkCoord);
                     break;
                 case MESH:
                     chunk->writeMesh(vkc);
@@ -468,8 +520,6 @@ void chunkThreadFunction(VulkanContext &vkc, ChunkThread &ct) {
                     break; 
             }
         }
-        
-        // std::println("X,0,0: {:b}, 0,Y,0: {:b}, 0,0,Z: {:b}", chunk->opaquenessMask_X[1][0], chunk->opaquenessMask_Y[1][0], chunk->opaquenessMask_Z[1][0]);
     }
     delete[] vertexData;
     delete[] indexData;
@@ -538,13 +588,13 @@ void ChunkThread::loadAround(VulkanContext &vkc, const ChunkCoord center) {
 }
 
 // MUST LOCK chunks
-std::optional<Block> Terrain::getBlock(GlobalCoord gCoord) const noexcept {
+std::optional<Block> Terrain::getBlock(const GlobalCoord gCoord) const noexcept {
     if (!ct.chunks.contains(gCoord.chunk)) return std::nullopt;
     return ct.chunks.at(gCoord.chunk)->getBlock(gCoord.inner);
 }
 
 // Returns if successful. Returns false when chunk isn't loaded.
-void Terrain::setBlock(GlobalCoord gc, Block b) noexcept {
+void Terrain::setBlock(const GlobalCoord gc, const Block b) noexcept {
     ct.editsPending.try_emplace(gc, b);
     ct.threadCond.notify_one();
 }

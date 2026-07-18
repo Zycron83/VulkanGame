@@ -14,6 +14,10 @@ struct Camera {
     Camera(glm::vec3 pos, float x_angle, float y_angle) : position(pos), x_angle(x_angle), y_angle(y_angle) {
         calculate_front();
     }
+    Camera(glm::vec3 pos, glm::vec3 front) : position(pos), front(front), 
+        x_angle(glm::degrees(std::atan2(front.z, front.x))), 
+        y_angle(glm::degrees(glm::asin(front.y)))
+    {}
 
 	glm::vec3 position;
 	glm::vec3 front;
@@ -45,7 +49,7 @@ struct Camera {
         perspective[1][1] *= -1;
         
         glm::mat4 view = glm::lookAt(position, position + front, up);
-        auto out = glm::vec4(coord, 1.f) * (perspective * view);
+        auto out = perspective * view * glm::vec4(coord, 1.f);
         out /= out.w;
         return glm::vec3(out);
     }

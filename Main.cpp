@@ -1,10 +1,15 @@
-#include "Terrain.h"
 #include "vulkan/vulkan.hpp"
+#include <vulkan/vulkan_to_string.hpp>
 #include <GLFW/glfw3.h>
 
+#include <glm/ext/matrix_transform.hpp>
+#include <glm/geometric.hpp>
+#include <glm/gtc/constants.hpp>
 #include <glm/gtx/io.hpp>
 #include <glm/trigonometric.hpp>
 
+#define IM_VEC2_CLASS_EXTRA \
+    ImVec2(const glm::vec2& v) : x(v.x), y(v.y) {}
 #ifdef IMGUI_ENABLE
 #include "imgui.h"
 #include "backends/imgui_impl_glfw.h"
@@ -21,6 +26,7 @@
 #include "Renderer.h"
 #include "Debug.h"
 #include "Util.hpp"
+#include "Terrain.h"
 
 extern Settings g_Settings;
 Settings::NoiseSettings prev_NoiseSettings = g_Settings.Noise;
@@ -67,7 +73,6 @@ void MouseScrollEvent(GLFWwindow* window, double xoffset, double yoffset) {
     // Speed adjustment
     speed += yoffset * (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS ? 10.f : 1.f);
     if (speed < 1.f) speed = 1.f;
-    ;
     
 }
 
@@ -109,9 +114,20 @@ void MousePosEvent(GLFWwindow* window, double xpos, double ypos) {
     c->rotXY(offset_x * sensitivity, offset_y * sensitivity);
     
 }
+
 void MouseButtonEvent(GLFWwindow* window, int button, int action, int mods) {
-    if (action == GLFW_PRESS && button == GLFW_MOUSE_BUTTON_RIGHT) {
-        g_Renderer->terrain.setBlock(GlobalCoord{g_Renderer->camera->position}, Block::Stone);
+    if (action == GLFW_PRESS) {
+        auto gcOpt = g_Renderer->terrain.voxelRaycast(*g_Renderer->camera);
+        if (!gcOpt) return;
+        auto &[gc, optFace] = gcOpt.value();
+        if (button == GLFW_MOUSE_BUTTON_RIGHT) {
+            if (!optFace) return; 
+            gc += *optFace;
+            g_Renderer->terrain.setBlock(gc, Block::Stone);
+        }
+        if (button == GLFW_MOUSE_BUTTON_LEFT) {
+            g_Renderer->terrain.setBlock(gc, Block::Air);
+        }
     }
 }
 void ErrorEvent(int code, const char* what)
@@ -174,9 +190,9 @@ int main(int argc, char* argv[])
     try {
         g_Renderer = new Renderer(window);
         g_Renderer->camera = std::make_unique<Camera>(Camera{
-            glm::vec3(-5, 5, -5),
+            glm::vec3(0,0,0),
             45.0f,
-            -30.0f,
+            0.0f,
         });
 
         #ifdef IMGUI_ENABLE
@@ -204,8 +220,7 @@ int main(int argc, char* argv[])
             timer.start();
 
             int w, h;
-            // glfwGetFramebufferSize(window, &w, &h);
-            // const glm::vec3 s_pos = g_Renderer->camera->screenPos(w, h, glm::vec3(.5, .5, .5)) * glm::vec3(w, h, 1);
+            glfwGetFramebufferSize(window, &w, &h);
             
             #ifdef IMGUI_ENABLE
             ImGui_ImplVulkan_NewFrame();
@@ -216,11 +231,13 @@ int main(int argc, char* argv[])
                 using namespace ImGui;
                 Begin("Camera");
                 auto c = g_Renderer->camera.get();
+                Camera cursorCam{-c->front, c->front};
+                const glm::vec3 s_pos = cursorCam.screenPos(w, h, glm::vec3(0));
                 SliderFloat("FOV", &c->fov, 0, 360);
                 InputFloat2("xy Angles", &c->x_angle);
                 InputFloat3("Position", (float*)&c->position);
-                Text("Speed: %f", speed);
-                // InputFloat3("S_POS", (float*)&s_pos);
+                InputFloat3("Front", (float*)&c->front);
+                InputFloat3("S_POS", (float*)&s_pos);
                 End();
 
                 Begin("Info");
@@ -238,7 +255,42 @@ int main(int argc, char* argv[])
                 // InputFloat("lacunarity", &g_Settings.Noise.lacunarity);
                 // InputFloat("persistence", &g_Settings.Noise.persistence);
                 // InputFloat("scale", &g_Settings.Noise.scale);
-                // End();   
+                // End();
+                // auto perspective = glm::ortho(-2.0f, 2.0f, -2.0f, 2.0f);
+
+                // perspective[1][1] *= -1;
+                // auto view = glm::lookAt(-c->front, glm::vec3{0}, glm::vec3(0, 1, 0));
+                
+                const float aspect = (float)h / w;
+                constexpr float A = 30.f;
+                const auto ortho = glm::ortho<float>(-A, A, aspect * -A, aspect * A);
+                const auto view = glm::lookAt(-c->front * 100.0f, glm::vec3{0}, glm::vec3{0,1,0});
+                auto screenPos = [&, h, w](glm::vec3 coord) {
+                    auto clipSpace = ortho * view * glm::vec4{coord, 1.0f};
+                    if (clipSpace.w != 0) clipSpace /= clipSpace.w;
+                    auto screenSpace = glm::vec3{(clipSpace.x + 1.0f) * 0.5f * w, (1.0f - clipSpace.y) * 0.5f * h, clipSpace.z};
+                    return screenSpace;
+                };
+                const auto mid = glm::vec2{screenPos(glm::vec3{0})};
+                auto draw = ImGui::GetForegroundDrawList();
+                draw->AddLine(
+                    mid,
+                    glm::vec2{screenPos(glm::vec3{1,0,0})}, 
+                    IM_COL32(255,0,0,255), 
+                    2.0f
+                );
+                draw->AddLine(
+                    mid,
+                    glm::vec2{screenPos(glm::vec3{0,1,0})}, 
+                    IM_COL32(0,255,0,255), 
+                    2.0f
+                );
+                draw->AddLine(
+                    mid,
+                    glm::vec2{screenPos(glm::vec3{0,0,1})}, 
+                    IM_COL32(0,0,255,255), 
+                    2.0f
+                );
             }
             
             
@@ -265,7 +317,7 @@ int main(int argc, char* argv[])
         }
     }
     catch (vk::SystemError &expt) {
-        std::cerr << "[Vulkan System Error!] :: " << expt.what() << " | " << vkResultString(vk::Result(expt.code().value())) << std::endl;
+        std::cerr << "[Vulkan System Error!] :: " << expt.what() << " | " << vk::to_string(vk::Result(expt.code().value())) << std::endl;
         cleanup();
         return 1;
     }

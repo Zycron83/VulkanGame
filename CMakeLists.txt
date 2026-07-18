@@ -51,7 +51,7 @@ include(FindVulkan)
 target_include_directories(VulkanGame PRIVATE 
     include
     "${Vulkan_INCLUDE_DIRS}"
-    "vendor/GLM/include"
+    "vendor/glm-master/include"
     "vendor/imgui"
     "vendor/simplex-noise/include"
     "vendor/readerwriterqueue/include"

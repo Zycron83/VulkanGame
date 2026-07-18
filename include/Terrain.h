@@ -16,12 +16,22 @@
 #include "Concurrent.hpp"
 #include "Buffer.h"
 #include "Camera.hpp"
-#include "Context.h"
+#include "Util.hpp"
 
 constexpr int CHUNK_LENGTH = 32;
 constexpr int CHUNK_BOTTOM = 0;
 constexpr int CHUNK_TOP = 2;
 using MaskLine = uint32_t;
+
+enum Dir {
+    X_POS, // Z, Y
+    X_NEG, // Z, Y
+    Y_POS, // X, Z
+    Y_NEG, // X, Z
+    Z_POS, // Y, X
+    Z_NEG, // Y, X
+};
+
 template<>
 struct std::formatter<glm::ivec3> {
     constexpr auto parse(std::format_parse_context &ctx) {
@@ -38,10 +48,36 @@ struct GlobalCoord {
         return this->chunk * CHUNK_LENGTH + this->inner;
     }
     GlobalCoord() {}
-    GlobalCoord(glm::ivec3 v) : chunk(v / CHUNK_LENGTH), inner(v % CHUNK_LENGTH) {
-        if (inner.x < 0) inner.x += CHUNK_LENGTH;
-        if (inner.y < 0) inner.y += CHUNK_LENGTH;
-        if (inner.z < 0) inner.z += CHUNK_LENGTH;
+    GlobalCoord(glm::ivec3 v) {
+        for (int i = 0; i < 3; i += 1) {
+            chunk[i] = std::floor(v[i] / float{CHUNK_LENGTH});
+            inner[i] = v[i] % CHUNK_LENGTH;
+            if (inner[i] < 0) 
+                inner[i] += CHUNK_LENGTH;
+        }
+    }
+    
+    void operator+=(const Dir dir) {
+        switch (dir) {
+            case X_POS:
+                if (inner.x == CHUNK_LENGTH) { inner.x = 0; chunk.x += 1; }
+                else inner.x += 1;
+            case X_NEG:
+                if (inner.x == 0) { inner.x = CHUNK_LENGTH; chunk.x -= 1; }
+                else inner.x -= 1;
+            case Y_POS:
+                if (inner.y == CHUNK_LENGTH) { inner.y = 0; chunk.y += 1; }
+                else inner.y += 1;
+            case Y_NEG:
+                if (inner.y == 0) { inner.y = CHUNK_LENGTH; chunk.y -= 1; }
+                else inner.y -= 1;
+            case Z_POS:
+                if (inner.z == CHUNK_LENGTH) { inner.z = 0; chunk.z += 1; }
+                else inner.z += 1;
+            case Z_NEG:
+                if (inner.z == 0) { inner.z = CHUNK_LENGTH; chunk.z -= 1; }
+                else inner.z -= 1;
+        }
     }
 
     void operator+=(const glm::ivec3 &rhs) {
@@ -72,6 +108,15 @@ struct GlobalCoord {
     ChunkCoord chunk;
     InnerCoord inner;
 };
+template<>
+struct std::formatter<GlobalCoord> {
+    constexpr auto parse(std::format_parse_context &ctx) {
+		return ctx.begin();
+	}
+    auto format(const GlobalCoord &gc, std::format_context& ctx) const {
+        return std::format_to(std::move(ctx.out()), "{}.{}", gc.chunk, gc.inner);
+    }
+};
 
 enum class Block : uint8_t {
     Invalid = 0, Air = 0, Grass, Dirt, Stone
@@ -79,14 +124,6 @@ enum class Block : uint8_t {
 static bool transparent(Block b) {
     return b <= Block::Air;
 }
-enum Dir {
-    X_POS, // Z, Y
-    X_NEG, // Z, Y
-    Y_POS, // X, Z
-    Y_NEG, // X, Z
-    Z_POS, // Y, X
-    Z_NEG, // Y, X
-};
 
 namespace std {
     template<typename T, int N, int M = N>
@@ -98,13 +135,6 @@ struct Chunk {
     std::array2<MaskLine, CHUNK_LENGTH> opaquenessMask_Y{0}; // X, Z
     std::array2<MaskLine, CHUNK_LENGTH> opaquenessMask_Z{0}; // Y, X
     std::array2<MaskLine, CHUNK_LENGTH> opaquenessMask_X{0}; // Z, Y
-    // std::array2<MaskLine, 6, CHUNK_LENGTH> borderMasks{0};
-    // std::optional<std::array<uint32_t, CHUNK_LENGTH>> borderMask_X_POS; 
-    // std::optional<std::array<uint32_t, CHUNK_LENGTH>> borderMask_X_NEG; 
-    // std::optional<std::array<uint32_t, CHUNK_LENGTH>> borderMask_Y_POS; 
-    // std::optional<std::array<uint32_t, CHUNK_LENGTH>> borderMask_Y_NEG; 
-    // std::optional<std::array<uint32_t, CHUNK_LENGTH>> borderMask_Z_POS; 
-    // std::optional<std::array<uint32_t, CHUNK_LENGTH>> borderMask_Z_NEG; 
     std::array<Chunk *, 6> neighbourChunks{0};
     AllocBuffer vertexBuffer;
     AllocBuffer indexBuffer;
@@ -130,16 +160,6 @@ struct Chunk {
     void writeMesh(VulkanContext &vkc);
 
 };
-// template <glm::length_t L, typename T, glm::qualifier Q> 
-// struct std::formatter<glm::vec<L, T, Q>> : std::range_formatter<T> {
-// 	constexpr auto parse(auto &ctx) {
-// 		return ctx.begin();
-// 	}
-
-// 	auto format(const glm::vec<L, T, Q> &vec, auto &ctx) {
-// 		return std::range_formatter<T>(std::span(&vec, L), ctx);
-// 	}
-// };
 template<>
 struct std::formatter<Chunk> {
     constexpr auto parse(std::format_parse_context &ctx) {
@@ -186,10 +206,11 @@ struct Terrain {
     Terrain(VulkanContext &);
     ~Terrain();
 
-    void tickFrame(const Camera &camera) noexcept;
-    std::optional<Block> getBlock(GlobalCoord) const noexcept;
-    void setBlock(GlobalCoord, Block) noexcept;
+    void tickFrame(const Camera &) noexcept;
+    std::optional<Block> getBlock(const GlobalCoord) const noexcept;
+    void setBlock(const GlobalCoord, const Block) noexcept;
     void draw(vk::CommandBuffer);
-
+    std::optional<std::pair<GlobalCoord, std::optional<Dir>>> voxelRaycast(const Camera &);
+    
 };
 
